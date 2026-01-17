@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from datetime import datetime
 from typing import Optional
@@ -55,8 +56,12 @@ class PlaybackReportingImporter:
 
             data = response.json()
 
-        columns = data.get("colums", [])
+        columns = data.get("columns") or data.get("colums") or []
         results = data.get("results", [])
+
+        if not columns:
+            logger.error("Playback Reporting response missing columns")
+            return 0
 
         if not results:
             logger.info("No playback data found to import")
@@ -71,8 +76,14 @@ class PlaybackReportingImporter:
         for row in results:
             row_dict = dict(zip(columns, row))
 
-            # Generate a unique session ID based on the rowid
-            session_id = f"imported_{row_dict.get('rowid', row[0])}"
+            # Generate a stable session ID (prefer rowid when available)
+            rowid = row_dict.get("rowid")
+            if rowid:
+                session_id = f"imported_{rowid}"
+            else:
+                fingerprint = "|".join(str(row_dict.get(k, "")) for k in columns)
+                digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()
+                session_id = f"imported_{digest}"
 
             # Check if already imported
             existing = await db.get_session_by_id(session_id)

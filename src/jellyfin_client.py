@@ -126,6 +126,8 @@ class JellyfinWebSocketClient:
                 continue
 
             session_id = session_data.get("Id", "")
+            if not session_id:
+                continue
             active_session_ids.add(session_id)
 
             play_state = session_data.get("PlayState", {})
@@ -140,8 +142,8 @@ class JellyfinWebSocketClient:
             if not existing:
                 event = self._extract_playback_event(session_data, now_playing)
                 await self._create_session(event)
-            elif not is_paused:
-                # Update progress
+            else:
+                # Update progress and keep session fresh, even if paused.
                 self._session_durations[session_id] = duration_seconds
                 await db.update_session_progress(session_id, duration_seconds)
 

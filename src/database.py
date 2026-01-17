@@ -469,6 +469,14 @@ class Database:
 
     def _row_to_session(self, row: aiosqlite.Row) -> Session:
         """Convert a database row to a Session model."""
+        def parse_dt(value: Optional[str], fallback: Optional[datetime]) -> datetime:
+            if value:
+                return datetime.fromisoformat(value)
+            if fallback:
+                return fallback
+            return datetime.fromtimestamp(0)
+
+        started_at = parse_dt(row["started_at"], None)
         return Session(
             id=row["id"],
             session_id=row["session_id"],
@@ -483,13 +491,13 @@ class Database:
             series_name=row["series_name"],
             season_number=row["season_number"],
             episode_number=row["episode_number"],
-            started_at=datetime.fromisoformat(row["started_at"]),
+            started_at=started_at,
             ended_at=(
                 datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None
             ),
             play_duration_seconds=row["play_duration_seconds"],
             is_active=bool(row["is_active"]),
-            last_progress_update=datetime.fromisoformat(row["last_progress_update"]),
+            last_progress_update=parse_dt(row["last_progress_update"], started_at),
         )
 
 
