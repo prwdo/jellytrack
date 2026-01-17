@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
+import httpx
 import websockets
 
 from .config import settings
@@ -19,8 +20,9 @@ class JellyfinWebSocketClient:
         self._running = False
         self._reconnect_delay = 1
         self._max_reconnect_delay = 60
-        self._session_durations: dict[str, int] = {}
         self._on_session_update: Optional[Callable[[], Awaitable[None]]] = None
+        self._connected = False
+        self._last_message_at: Optional[datetime] = None
 
     def set_session_update_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
         """Set callback to be called when sessions are updated."""
@@ -54,11 +56,14 @@ class JellyfinWebSocketClient:
         async with websockets.connect(ws_url) as ws:
             self.ws = ws
             self._reconnect_delay = 1
+            self._connected = True
             logger.info("Connected to Jellyfin WebSocket")
 
             # Subscribe to session updates (every 2 seconds)
             await ws.send(json.dumps({"MessageType": "SessionsStart", "Data": "0,2000"}))
             logger.info("Subscribed to session updates")
+
+            await self._refresh_sessions()
 
             # Start timeout checker
             timeout_task = asyncio.create_task(self._check_timeouts())
@@ -67,6 +72,7 @@ class JellyfinWebSocketClient:
                 async for message in ws:
                     await self._handle_message(message)
             finally:
+                self._connected = False
                 timeout_task.cancel()
                 try:
                     await timeout_task
@@ -90,6 +96,7 @@ class JellyfinWebSocketClient:
         """Handle incoming WebSocket message."""
         try:
             data = json.loads(message)
+            self._last_message_at = datetime.now()
             message_type = data.get("MessageType", "")
 
             if message_type == "Sessions":
@@ -111,6 +118,7 @@ class JellyfinWebSocketClient:
     async def _handle_sessions(self, sessions: list[dict]) -> None:
         """Handle Sessions update message - track active playback."""
         active_session_ids = set()
+        now = datetime.now()
 
         for session_data in sessions:
             now_playing = session_data.get("NowPlayingItem")
@@ -124,6 +132,7 @@ class JellyfinWebSocketClient:
 
             play_state = session_data.get("PlayState", {})
             position_ticks = play_state.get("PositionTicks", 0)
+            is_paused = play_state.get("IsPaused", False)
 
             # Calculate duration in seconds
             duration_seconds = position_ticks // 10_000_000
@@ -132,21 +141,21 @@ class JellyfinWebSocketClient:
             existing = await db.get_active_session(session_id)
             if not existing:
                 event = self._extract_playback_event(session_data, now_playing)
-                await self._create_session(event)
+                await self._create_session(event, duration_seconds, is_paused)
             else:
-                # Update progress and keep session fresh, even if paused.
-                self._session_durations[session_id] = duration_seconds
-                await db.update_session_progress(session_id, duration_seconds)
+                play_add, paused_add = self._calculate_deltas(
+                    existing, duration_seconds, is_paused, now
+                )
+                await db.update_session_state(
+                    session_id, duration_seconds, is_paused, play_add, paused_add, now
+                )
 
         # Check for ended sessions (not in active list anymore)
         active_db_sessions = await db.get_active_sessions()
         for db_session in active_db_sessions:
             if db_session.session_id not in active_session_ids:
-                duration = self._session_durations.get(
-                    db_session.session_id, db_session.play_duration_seconds
-                )
-                await db.end_session(db_session.session_id, duration)
-                self._session_durations.pop(db_session.session_id, None)
+                await self._finalize_session(db_session, now)
+                await db.end_session(db_session.session_id)
                 logger.info(f"Session ended: {db_session.user_name} - {db_session.media_title}")
 
         if self._on_session_update:
@@ -175,7 +184,7 @@ class JellyfinWebSocketClient:
         event = self._extract_playback_event(session_data, now_playing)
         existing = await db.get_active_session(session_id)
         if not existing:
-            await self._create_session(event)
+            await self._create_session(event, 0, False)
 
     async def _handle_playback_stop(self, data: dict) -> None:
         """Handle PlaybackStopped event."""
@@ -186,11 +195,11 @@ class JellyfinWebSocketClient:
         play_state = data.get("PlayState", {})
         position_ticks = play_state.get("PositionTicks", 0)
         duration_seconds = position_ticks // 10_000_000
-
-        # Use tracked duration if available
-        final_duration = self._session_durations.get(session_id, duration_seconds)
-        await db.end_session(session_id, final_duration)
-        self._session_durations.pop(session_id, None)
+        is_paused = play_state.get("IsPaused", False)
+        existing = await db.get_active_session(session_id)
+        if existing:
+            await self._finalize_session(existing, datetime.now(), duration_seconds, is_paused)
+        await db.end_session(session_id)
 
         logger.info(f"Playback stopped for session {session_id}")
 
@@ -214,7 +223,9 @@ class JellyfinWebSocketClient:
             episode_number=now_playing.get("IndexNumber"),
         )
 
-    async def _create_session(self, event: PlaybackEvent) -> None:
+    async def _create_session(
+        self, event: PlaybackEvent, position_seconds: int, is_paused: bool
+    ) -> None:
         """Create a new session from a playback event."""
         now = datetime.now()
         session = Session(
@@ -231,13 +242,70 @@ class JellyfinWebSocketClient:
             season_number=event.season_number,
             episode_number=event.episode_number,
             started_at=now,
+            play_duration_seconds=0,
+            paused_duration_seconds=0,
+            last_position_seconds=position_seconds,
+            last_state_is_paused=is_paused,
             last_progress_update=now,
         )
         await db.create_session(session)
-        self._session_durations[event.session_id] = 0
         logger.info(
             f"Session started: {event.user_name} - {event.item_name} on {event.device_name}"
         )
+
+    def _calculate_deltas(
+        self,
+        existing: Session,
+        position_seconds: int,
+        is_paused: bool,
+        now: datetime,
+    ) -> tuple[int, int]:
+        elapsed = max(0, int((now - existing.last_progress_update).total_seconds()))
+        paused_add = elapsed if existing.last_state_is_paused else 0
+        play_add = 0
+        if not is_paused:
+            play_add = max(0, position_seconds - existing.last_position_seconds)
+        return play_add, paused_add
+
+    async def _finalize_session(
+        self,
+        existing: Session,
+        now: datetime,
+        position_seconds: Optional[int] = None,
+        is_paused: Optional[bool] = None,
+    ) -> None:
+        position = (
+            position_seconds if position_seconds is not None else existing.last_position_seconds
+        )
+        paused = is_paused if is_paused is not None else existing.last_state_is_paused
+        play_add, paused_add = self._calculate_deltas(existing, position, paused, now)
+        await db.update_session_state(
+            existing.session_id, position, paused, play_add, paused_add, now
+        )
+
+    async def _refresh_sessions(self) -> None:
+        """Refresh session list via REST to catch up after reconnect."""
+        url = f"{settings.jellyfin_url}/Sessions"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                params={"api_key": settings.jellyfin_api_key},
+                timeout=10.0,
+            )
+        if response.status_code != 200:
+            logger.warning(f"Failed to refresh sessions: {response.status_code}")
+            return
+        sessions = response.json()
+        await self._handle_sessions(sessions)
+
+    def status(self) -> dict:
+        """Expose client status for health/metrics."""
+        return {
+            "connected": self._connected,
+            "last_message_at": (
+                self._last_message_at.isoformat() if self._last_message_at else None
+            ),
+        }
 
 
 # Global client instance

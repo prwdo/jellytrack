@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_path: str = "./data/jellytrack.db"
     dashboard_port: int = 8085
     session_timeout_minutes: int = 5
+    retention_days: int = 180
+    aggregation_interval_hours: int = 24
 
     class Config:
         env_file = ".env"

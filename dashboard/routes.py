@@ -1,16 +1,26 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
+from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
 from src.database import db
+from src.jellyfin_client import jellyfin_client
 
 router = APIRouter()
 
 templates_dir = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=templates_dir)
+
+ACTIVE_SESSIONS = Gauge("jellytrack_active_sessions", "Active playback sessions")
+TOTAL_SESSIONS = Gauge("jellytrack_total_sessions", "Total sessions tracked")
+WS_CONNECTED = Gauge("jellytrack_ws_connected", "Jellyfin websocket connected")
+LAST_WS_MESSAGE = Gauge(
+    "jellytrack_ws_last_message_timestamp", "Last websocket message unix timestamp"
+)
 
 
 def format_duration(seconds: int) -> str:
@@ -225,3 +235,38 @@ async def device_stats(days: int = 30):
     """Get device stats as JSON."""
     devices = await db.get_device_stats(days=days)
     return [d.model_dump() for d in devices]
+
+
+@router.get("/health")
+async def health():
+    """Basic health check."""
+    status = jellyfin_client.status()
+    try:
+        _ = db.conn
+        db_connected = True
+    except RuntimeError:
+        db_connected = False
+    return {
+        "status": "ok",
+        "db_connected": db_connected,
+        "ws_connected": status["connected"],
+        "ws_last_message_at": status["last_message_at"],
+    }
+
+
+@router.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    active = await db.get_active_sessions()
+    summary = await db.get_summary_stats(days=36500)
+    status = jellyfin_client.status()
+
+    ACTIVE_SESSIONS.set(len(active))
+    TOTAL_SESSIONS.set(summary["total_sessions"])
+    WS_CONNECTED.set(1 if status["connected"] else 0)
+    if status["last_message_at"]:
+        LAST_WS_MESSAGE.set(datetime.fromisoformat(status["last_message_at"]).timestamp())
+    else:
+        LAST_WS_MESSAGE.set(0)
+
+    return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)

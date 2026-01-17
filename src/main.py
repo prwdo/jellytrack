@@ -37,6 +37,7 @@ class JellytrackServer:
         # Start WebSocket client and web server
         ws_task = asyncio.create_task(self._run_websocket_client())
         web_task = asyncio.create_task(self._run_web_server())
+        agg_task = asyncio.create_task(self._run_aggregator())
 
         logger.info(f"Dashboard available at http://localhost:{settings.dashboard_port}")
 
@@ -46,6 +47,7 @@ class JellytrackServer:
         # Cancel tasks
         ws_task.cancel()
         web_task.cancel()
+        agg_task.cancel()
 
         try:
             await ws_task
@@ -54,6 +56,10 @@ class JellytrackServer:
 
         try:
             await web_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await agg_task
         except asyncio.CancelledError:
             pass
 
@@ -91,6 +97,18 @@ class JellytrackServer:
             await server.serve()
         except asyncio.CancelledError:
             pass
+
+    async def _run_aggregator(self) -> None:
+        """Run periodic retention aggregation."""
+        while True:
+            try:
+                if settings.retention_days > 0:
+                    pruned = await db.aggregate_and_prune(settings.retention_days)
+                    if pruned > 0:
+                        logger.info(f"Aggregated and pruned {pruned} sessions")
+            except Exception as e:
+                logger.error(f"Aggregation error: {e}")
+            await asyncio.sleep(settings.aggregation_interval_hours * 3600)
 
 
 def main() -> None:

@@ -6,6 +6,8 @@ Jellytrack tracks Jellyfin playback sessions in SQLite and serves a small dashbo
 - Live session tracking via Jellyfin WebSocket
 - Historical import from Playback Reporting plugin
 - Dashboard with user, device, and media stats
+- Retention with daily/hourly aggregation for older sessions
+- Health and Prometheus metrics endpoints
 
 ## Requirements
 - Python 3.12+
@@ -16,6 +18,9 @@ Jellytrack tracks Jellyfin playback sessions in SQLite and serves a small dashbo
 1. Create a `.env` file with:
    - `JELLYFIN_URL` (e.g. `http://localhost:8096`)
    - `JELLYFIN_API_KEY`
+   - `RETENTION_DAYS` (optional, default: 180)
+   - `AGGREGATION_INTERVAL_HOURS` (optional, default: 24)
+     - set `RETENTION_DAYS=0` to disable pruning
 2. Install deps:
 ```bash
 pip install -r requirements.txt
@@ -48,6 +53,10 @@ Format:
 ```bash
 ruff format
 ```
+
+## Observability
+- Health check: `GET /health`
+- Prometheus metrics: `GET /metrics`
 
 ## Docker
 ```bash

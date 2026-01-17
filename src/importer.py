@@ -147,7 +147,10 @@ class PlaybackReportingImporter:
                 started_at=started_at,
                 ended_at=started_at,  # Historical data doesn't have end time
                 play_duration_seconds=play_duration,
+                paused_duration_seconds=0,
                 is_active=False,
+                last_position_seconds=play_duration,
+                last_state_is_paused=False,
                 last_progress_update=started_at,
             )
 

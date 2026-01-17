@@ -21,7 +21,10 @@ class Session(BaseModel):
     started_at: datetime
     ended_at: Optional[datetime] = None
     play_duration_seconds: int = 0
+    paused_duration_seconds: int = 0
     is_active: bool = True
+    last_position_seconds: int = 0
+    last_state_is_paused: bool = False
     last_progress_update: datetime
 
 
