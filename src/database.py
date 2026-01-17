@@ -36,6 +36,27 @@ class Database:
     def _include_aggregates(self, days: int) -> bool:
         return days > settings.retention_days
 
+    def _build_filter_clause(
+        self,
+        user_id: Optional[str],
+        device_name: Optional[str],
+        media_type: Optional[str],
+    ) -> tuple[str, list[str]]:
+        clauses = []
+        params: list[str] = []
+        if user_id:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if device_name:
+            clauses.append("device_name = ?")
+            params.append(device_name)
+        if media_type:
+            clauses.append("media_type = ?")
+            params.append(media_type)
+        if not clauses:
+            return "", []
+        return " AND " + " AND ".join(clauses), params
+
     async def _create_tables(self) -> None:
         """Create database tables if they don't exist."""
         await self.conn.execute("""
@@ -316,20 +337,38 @@ class Database:
             await self.conn.execute("ROLLBACK")
             raise
 
-    async def get_active_sessions(self) -> list[Session]:
+    async def get_active_sessions(
+        self,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[Session]:
         """Get all active sessions."""
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         cursor = await self.conn.execute(
-            "SELECT * FROM sessions WHERE is_active = TRUE ORDER BY started_at DESC"
+            f"""
+            SELECT * FROM sessions
+            WHERE is_active = TRUE{filters}
+            ORDER BY started_at DESC
+            """,
+            params,
         )
         rows = await cursor.fetchall()
         return [self._row_to_session(row) for row in rows]
 
-    async def get_user_watchtime(self, days: int = 30) -> list[UserWatchtime]:
+    async def get_user_watchtime(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[UserWatchtime]:
         """Get watchtime statistics per user."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     user_id,
                     user_name,
@@ -342,7 +381,7 @@ class Database:
                         SUM(play_duration_seconds) as total_seconds,
                         COUNT(*) as session_count
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     GROUP BY user_id, user_name
                     UNION ALL
                     SELECT
@@ -351,28 +390,28 @@ class Database:
                         SUM(play_seconds) as total_seconds,
                         SUM(session_count) as session_count
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                     GROUP BY user_id, user_name
                 )
                 GROUP BY user_id, user_name
                 ORDER BY total_seconds DESC
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
         else:
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     user_id,
                     user_name,
                     SUM(play_duration_seconds) as total_seconds,
                     COUNT(*) as session_count
                 FROM sessions
-                WHERE started_at >= ?
+                WHERE started_at >= ?{filters}
                 GROUP BY user_id, user_name
                 ORDER BY total_seconds DESC
                 """,
-                (since.isoformat(),),
+                (since.isoformat(), *params),
             )
         rows = await cursor.fetchall()
         return [
@@ -385,12 +424,20 @@ class Database:
             for row in rows
         ]
 
-    async def get_top_media(self, days: int = 30, limit: int = 10) -> list[TopMedia]:
+    async def get_top_media(
+        self,
+        days: int = 30,
+        limit: int = 10,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[TopMedia]:
         """Get top watched media."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     media_id,
                     media_title,
@@ -407,7 +454,7 @@ class Database:
                         SUM(play_duration_seconds) as total_seconds,
                         COUNT(*) as play_count
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     GROUP BY media_id, media_title, media_type, series_name
                     UNION ALL
                     SELECT
@@ -418,18 +465,18 @@ class Database:
                         SUM(play_seconds) as total_seconds,
                         SUM(session_count) as play_count
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                     GROUP BY media_id, media_title, media_type, series_name
                 )
                 GROUP BY media_id, media_title, media_type, series_name
                 ORDER BY total_seconds DESC
                 LIMIT ?
                 """,
-                (since.isoformat(), since.date().isoformat(), limit),
+                (since.isoformat(), *params, since.date().isoformat(), *params, limit),
             )
         else:
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     media_id,
                     media_title,
@@ -438,12 +485,12 @@ class Database:
                     SUM(play_duration_seconds) as total_seconds,
                     COUNT(*) as play_count
                 FROM sessions
-                WHERE started_at >= ?
+                WHERE started_at >= ?{filters}
                 GROUP BY media_id, media_title, media_type, series_name
                 ORDER BY total_seconds DESC
                 LIMIT ?
                 """,
-                (since.isoformat(), limit),
+                (since.isoformat(), *params, limit),
             )
         rows = await cursor.fetchall()
         return [
@@ -458,12 +505,19 @@ class Database:
             for row in rows
         ]
 
-    async def get_hourly_stats(self, days: int = 30) -> list[HourlyStats]:
+    async def get_hourly_stats(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[HourlyStats]:
         """Get usage statistics by hour of day."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     hour,
                     SUM(session_count) as session_count,
@@ -474,7 +528,7 @@ class Database:
                         COUNT(*) as session_count,
                         SUM(play_duration_seconds) as total_seconds
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     GROUP BY hour
                     UNION ALL
                     SELECT
@@ -482,27 +536,27 @@ class Database:
                         SUM(session_count) as session_count,
                         SUM(play_seconds) as total_seconds
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                     GROUP BY hour
                 )
                 GROUP BY hour
                 ORDER BY hour
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
         else:
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     CAST(strftime('%H', started_at) AS INTEGER) as hour,
                     COUNT(*) as session_count,
                     SUM(play_duration_seconds) as total_seconds
                 FROM sessions
-                WHERE started_at >= ?
+                WHERE started_at >= ?{filters}
                 GROUP BY hour
                 ORDER BY hour
                 """,
-                (since.isoformat(),),
+                (since.isoformat(), *params),
             )
         rows = await cursor.fetchall()
         return [
@@ -514,12 +568,19 @@ class Database:
             for row in rows
         ]
 
-    async def get_device_stats(self, days: int = 30) -> list[DeviceStats]:
+    async def get_device_stats(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[DeviceStats]:
         """Get device usage statistics."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     device_name,
                     client_name,
@@ -532,7 +593,7 @@ class Database:
                         COUNT(*) as session_count,
                         SUM(play_duration_seconds) as total_seconds
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     GROUP BY device_name, client_name
                     UNION ALL
                     SELECT
@@ -541,28 +602,28 @@ class Database:
                         SUM(session_count) as session_count,
                         SUM(play_seconds) as total_seconds
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                     GROUP BY device_name, client_name
                 )
                 GROUP BY device_name, client_name
                 ORDER BY total_seconds DESC
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
         else:
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     device_name,
                     client_name,
                     COUNT(*) as session_count,
                     SUM(play_duration_seconds) as total_seconds
                 FROM sessions
-                WHERE started_at >= ?
+                WHERE started_at >= ?{filters}
                 GROUP BY device_name, client_name
                 ORDER BY total_seconds DESC
                 """,
-                (since.isoformat(),),
+                (since.isoformat(), *params),
             )
         rows = await cursor.fetchall()
         return [
@@ -575,12 +636,19 @@ class Database:
             for row in rows
         ]
 
-    async def get_daily_stats(self, days: int = 30) -> list[dict]:
+    async def get_daily_stats(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[dict]:
         """Get daily usage statistics."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     date,
                     SUM(session_count) as session_count,
@@ -591,7 +659,7 @@ class Database:
                         COUNT(*) as session_count,
                         SUM(play_duration_seconds) as total_seconds
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     GROUP BY date(started_at)
                     UNION ALL
                     SELECT
@@ -599,27 +667,27 @@ class Database:
                         SUM(session_count) as session_count,
                         SUM(play_seconds) as total_seconds
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                     GROUP BY date
                 )
                 GROUP BY date
                 ORDER BY date
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
         else:
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     date(started_at) as date,
                     COUNT(*) as session_count,
                     SUM(play_duration_seconds) as total_seconds
                 FROM sessions
-                WHERE started_at >= ?
+                WHERE started_at >= ?{filters}
                 GROUP BY date(started_at)
                 ORDER BY date
                 """,
-                (since.isoformat(),),
+                (since.isoformat(), *params),
             )
         rows = await cursor.fetchall()
         return [
@@ -631,12 +699,19 @@ class Database:
             for row in rows
         ]
 
-    async def get_summary_stats(self, days: int = 30) -> dict:
+    async def get_summary_stats(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> dict:
         """Get summary statistics."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     SUM(total_sessions) as total_sessions,
                     SUM(total_seconds) as total_seconds
@@ -645,40 +720,40 @@ class Database:
                         COUNT(*) as total_sessions,
                         COALESCE(SUM(play_duration_seconds), 0) as total_seconds
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     UNION ALL
                     SELECT
                         COALESCE(SUM(session_count), 0) as total_sessions,
                         COALESCE(SUM(play_seconds), 0) as total_seconds
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                 )
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
             row = await cursor.fetchone()
             users_cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT COUNT(DISTINCT user_id) as unique_users
                 FROM (
-                    SELECT user_id FROM sessions WHERE started_at >= ?
+                    SELECT user_id FROM sessions WHERE started_at >= ?{filters}
                     UNION
-                    SELECT user_id FROM session_aggregates WHERE date >= ?
+                    SELECT user_id FROM session_aggregates WHERE date >= ?{filters}
                 )
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
             users_row = await users_cursor.fetchone()
             media_cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT COUNT(DISTINCT media_id) as unique_media
                 FROM (
-                    SELECT media_id FROM sessions WHERE started_at >= ?
+                    SELECT media_id FROM sessions WHERE started_at >= ?{filters}
                     UNION
-                    SELECT media_id FROM session_aggregates WHERE date >= ?
+                    SELECT media_id FROM session_aggregates WHERE date >= ?{filters}
                 )
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
             media_row = await media_cursor.fetchone()
             return {
@@ -688,16 +763,16 @@ class Database:
                 "total_seconds": row["total_seconds"] or 0,
             }
         cursor = await self.conn.execute(
-            """
+            f"""
             SELECT
                 COUNT(*) as total_sessions,
                 COUNT(DISTINCT user_id) as unique_users,
                 COUNT(DISTINCT media_id) as unique_media,
                 COALESCE(SUM(play_duration_seconds), 0) as total_seconds
             FROM sessions
-            WHERE started_at >= ?
+            WHERE started_at >= ?{filters}
             """,
-            (since.isoformat(),),
+            (since.isoformat(), *params),
         )
         row = await cursor.fetchone()
         return {
@@ -707,12 +782,19 @@ class Database:
             "total_seconds": row["total_seconds"],
         }
 
-    async def get_media_type_stats(self, days: int = 30) -> list[dict]:
+    async def get_media_type_stats(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[dict]:
         """Get statistics by media type."""
         since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     media_type,
                     SUM(session_count) as session_count,
@@ -723,7 +805,7 @@ class Database:
                         COUNT(*) as session_count,
                         SUM(play_duration_seconds) as total_seconds
                     FROM sessions
-                    WHERE started_at >= ?
+                    WHERE started_at >= ?{filters}
                     GROUP BY media_type
                     UNION ALL
                     SELECT
@@ -731,27 +813,27 @@ class Database:
                         SUM(session_count) as session_count,
                         SUM(play_seconds) as total_seconds
                     FROM session_aggregates
-                    WHERE date >= ?
+                    WHERE date >= ?{filters}
                     GROUP BY media_type
                 )
                 GROUP BY media_type
                 ORDER BY total_seconds DESC
                 """,
-                (since.isoformat(), since.date().isoformat()),
+                (since.isoformat(), *params, since.date().isoformat(), *params),
             )
         else:
             cursor = await self.conn.execute(
-                """
+                f"""
                 SELECT
                     media_type,
                     COUNT(*) as session_count,
                     SUM(play_duration_seconds) as total_seconds
                 FROM sessions
-                WHERE started_at >= ?
+                WHERE started_at >= ?{filters}
                 GROUP BY media_type
                 ORDER BY total_seconds DESC
                 """,
-                (since.isoformat(),),
+                (since.isoformat(), *params),
             )
         rows = await cursor.fetchall()
         return [
@@ -763,16 +845,170 @@ class Database:
             for row in rows
         ]
 
-    async def get_recent_activity(self, limit: int = 20) -> list[Session]:
+    async def get_pause_stats(
+        self,
+        days: int = 30,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> dict:
+        """Get play vs pause totals."""
+        since = datetime.now() - timedelta(days=days)
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
+        if self._include_aggregates(days):
+            cursor = await self.conn.execute(
+                f"""
+                SELECT
+                    SUM(play_seconds) as play_seconds,
+                    SUM(paused_seconds) as paused_seconds
+                FROM (
+                    SELECT
+                        COALESCE(SUM(play_duration_seconds), 0) as play_seconds,
+                        COALESCE(SUM(paused_duration_seconds), 0) as paused_seconds
+                    FROM sessions
+                    WHERE started_at >= ?{filters}
+                    UNION ALL
+                    SELECT
+                        COALESCE(SUM(play_seconds), 0) as play_seconds,
+                        COALESCE(SUM(paused_seconds), 0) as paused_seconds
+                    FROM session_aggregates
+                    WHERE date >= ?{filters}
+                )
+                """,
+                (since.isoformat(), *params, since.date().isoformat(), *params),
+            )
+        else:
+            cursor = await self.conn.execute(
+                f"""
+                SELECT
+                    COALESCE(SUM(play_duration_seconds), 0) as play_seconds,
+                    COALESCE(SUM(paused_duration_seconds), 0) as paused_seconds
+                FROM sessions
+                WHERE started_at >= ?{filters}
+                """,
+                (since.isoformat(), *params),
+            )
+        row = await cursor.fetchone()
+        return {
+            "play_seconds": row["play_seconds"] or 0,
+            "paused_seconds": row["paused_seconds"] or 0,
+        }
+
+    async def get_filter_options(self, days: int = 30) -> dict:
+        """Get filter options for users, devices, and media types."""
+        since = datetime.now() - timedelta(days=days)
+        if self._include_aggregates(days):
+            users_cursor = await self.conn.execute(
+                """
+                SELECT user_id, user_name
+                FROM (
+                    SELECT user_id, user_name
+                    FROM sessions
+                    WHERE started_at >= ?
+                    GROUP BY user_id, user_name
+                    UNION
+                    SELECT user_id, user_name
+                    FROM session_aggregates
+                    WHERE date >= ?
+                    GROUP BY user_id, user_name
+                )
+                ORDER BY user_name
+                """,
+                (since.isoformat(), since.date().isoformat()),
+            )
+            devices_cursor = await self.conn.execute(
+                """
+                SELECT device_name
+                FROM (
+                    SELECT device_name
+                    FROM sessions
+                    WHERE started_at >= ?
+                    GROUP BY device_name
+                    UNION
+                    SELECT device_name
+                    FROM session_aggregates
+                    WHERE date >= ?
+                    GROUP BY device_name
+                )
+                ORDER BY device_name
+                """,
+                (since.isoformat(), since.date().isoformat()),
+            )
+            types_cursor = await self.conn.execute(
+                """
+                SELECT media_type
+                FROM (
+                    SELECT media_type
+                    FROM sessions
+                    WHERE started_at >= ?
+                    GROUP BY media_type
+                    UNION
+                    SELECT media_type
+                    FROM session_aggregates
+                    WHERE date >= ?
+                    GROUP BY media_type
+                )
+                ORDER BY media_type
+                """,
+                (since.isoformat(), since.date().isoformat()),
+            )
+        else:
+            users_cursor = await self.conn.execute(
+                """
+                SELECT user_id, user_name
+                FROM sessions
+                WHERE started_at >= ?
+                GROUP BY user_id, user_name
+                ORDER BY user_name
+                """,
+                (since.isoformat(),),
+            )
+            devices_cursor = await self.conn.execute(
+                """
+                SELECT device_name
+                FROM sessions
+                WHERE started_at >= ?
+                GROUP BY device_name
+                ORDER BY device_name
+                """,
+                (since.isoformat(),),
+            )
+            types_cursor = await self.conn.execute(
+                """
+                SELECT media_type
+                FROM sessions
+                WHERE started_at >= ?
+                GROUP BY media_type
+                ORDER BY media_type
+                """,
+                (since.isoformat(),),
+            )
+        users = await users_cursor.fetchall()
+        devices = await devices_cursor.fetchall()
+        types = await types_cursor.fetchall()
+        return {
+            "users": [{"id": row["user_id"], "name": row["user_name"]} for row in users],
+            "devices": [row["device_name"] for row in devices],
+            "media_types": [row["media_type"] for row in types],
+        }
+
+    async def get_recent_activity(
+        self,
+        limit: int = 20,
+        user_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        media_type: Optional[str] = None,
+    ) -> list[Session]:
         """Get recent playback activity."""
+        filters, params = self._build_filter_clause(user_id, device_name, media_type)
         cursor = await self.conn.execute(
-            """
+            f"""
             SELECT * FROM sessions
-            WHERE is_active = FALSE
+            WHERE is_active = FALSE{filters}
             ORDER BY started_at DESC
             LIMIT ?
             """,
-            (limit,),
+            (*params, limit),
         )
         rows = await cursor.fetchall()
         return [self._row_to_session(row) for row in rows]

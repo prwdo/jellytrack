@@ -17,10 +17,17 @@
                 </p>
                 {% endif %}
             </div>
+            {% if session.last_state_is_paused %}
+            <span class="flex-shrink-0 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-yellow-900 text-yellow-300">
+                <span class="w-2 h-2 bg-yellow-400 rounded-full mr-1"></span>
+                Paused
+            </span>
+            {% else %}
             <span class="flex-shrink-0 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-900 text-green-300">
                 <span class="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></span>
-                Live
+                Playing
             </span>
+            {% endif %}
         </div>
         <div class="mt-3 space-y-1">
             <div class="flex items-center text-sm">
@@ -40,7 +47,20 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
                 <span class="text-purple-400">{{ session.play_duration_seconds|duration }}</span>
+                {% if session.paused_duration_seconds > 0 %}
+                <span class="ml-2 text-xs text-gray-500">+ {{ session.paused_duration_seconds|duration }} paused</span>
+                {% endif %}
             </div>
+            {% set total_time = session.play_duration_seconds + session.paused_duration_seconds %}
+            {% if total_time > 0 %}
+            <div class="mt-2">
+                <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    {% set play_pct = (session.play_duration_seconds * 100 / total_time)|round(0) %}
+                    <div class="h-full bg-purple-500" style="width: {{ play_pct }}%"></div>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">{{ play_pct }}% playing</p>
+            </div>
+            {% endif %}
         </div>
     </div>
     {% endfor %}

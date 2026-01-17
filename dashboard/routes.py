@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -93,6 +94,18 @@ templates.env.filters["duration_long"] = format_duration_long
 templates.env.filters["timeago"] = timeago
 
 
+def _normalize_filter(value: str | None) -> str | None:
+    if not value or value == "all":
+        return None
+    return value
+
+
+def _percent_delta(current: int, previous: int) -> float | None:
+    if previous <= 0:
+        return None
+    return round(((current - previous) / previous) * 100, 1)
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, days: int = 30):
     """Main dashboard page."""
@@ -104,15 +117,68 @@ async def index(request: Request, days: int = 30):
     # For "all time", use a large number
     query_days = days if days > 0 else 3650
 
-    sessions = await db.get_active_sessions()
-    watchtime = await db.get_user_watchtime(days=query_days)
-    top_media = await db.get_top_media(days=query_days)
-    hourly = await db.get_hourly_stats(days=query_days)
-    devices = await db.get_device_stats(days=query_days)
-    summary = await db.get_summary_stats(days=query_days)
-    media_types = await db.get_media_type_stats(days=query_days)
-    recent = await db.get_recent_activity(limit=15)
-    daily = await db.get_daily_stats(days=min(query_days, 90))  # Max 90 days for daily chart
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+
+    sessions = await db.get_active_sessions(
+        user_id=user_id, device_name=device_name, media_type=media_type
+    )
+    watchtime = await db.get_user_watchtime(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    top_media = await db.get_top_media(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    hourly = await db.get_hourly_stats(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    devices = await db.get_device_stats(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    summary = await db.get_summary_stats(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    media_types = await db.get_media_type_stats(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    recent = await db.get_recent_activity(
+        limit=15,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    daily = await db.get_daily_stats(
+        days=min(query_days, 90),
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    pause_stats = await db.get_pause_stats(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    filters = await db.get_filter_options(days=query_days)
 
     # Prepare chart data as JSON
     # Hourly chart data - ensure all 24 hours are represented
@@ -137,9 +203,41 @@ async def index(request: Request, days: int = 30):
     device_labels = [d.device_name for d in devices[:8]]
     device_values = [d.total_seconds for d in devices[:8]]
 
+    # Highlights
+    highlight_user = watchtime[0] if watchtime else None
+    highlight_media = top_media[0] if top_media else None
+    highlight_device = devices[0] if devices else None
+
     # Period label for display
     period_labels = {7: "7 days", 30: "30 days", 90: "90 days", 365: "1 year", 0: "All time"}
     period_label = period_labels.get(days, "30 days")
+
+    filter_params = {
+        key: value
+        for key, value in {
+            "user_id": user_id,
+            "device_name": device_name,
+            "media_type": media_type,
+        }.items()
+        if value
+    }
+    filter_query = urlencode(filter_params)
+
+    trend = None
+    if days > 0:
+        current = summary
+        previous_total = await db.get_summary_stats(
+            days=query_days * 2,
+            user_id=user_id,
+            device_name=device_name,
+            media_type=media_type,
+        )
+        prev_sessions = max(0, previous_total["total_sessions"] - current["total_sessions"])
+        prev_seconds = max(0, previous_total["total_seconds"] - current["total_seconds"])
+        trend = {
+            "sessions": _percent_delta(current["total_sessions"], prev_sessions),
+            "watchtime": _percent_delta(current["total_seconds"], prev_seconds),
+        }
 
     return templates.TemplateResponse(
         "index.html",
@@ -152,6 +250,20 @@ async def index(request: Request, days: int = 30):
             "summary": summary,
             "media_types": media_types,
             "recent": recent,
+            "pause_stats": pause_stats,
+            "filters": filters,
+            "selected_filters": {
+                "user_id": user_id,
+                "device_name": device_name,
+                "media_type": media_type,
+            },
+            "filter_query": filter_query,
+            "highlights": {
+                "user": highlight_user,
+                "media": highlight_media,
+                "device": highlight_device,
+            },
+            "trend": trend,
             # Time period
             "selected_days": days,
             "period_label": period_label,
@@ -186,7 +298,12 @@ async def user_detail(request: Request, user_id: str):
 @router.get("/api/sessions/active", response_class=HTMLResponse)
 async def active_sessions(request: Request):
     """Get active sessions partial for HTMX."""
-    sessions = await db.get_active_sessions()
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+    sessions = await db.get_active_sessions(
+        user_id=user_id, device_name=device_name, media_type=media_type
+    )
     return templates.TemplateResponse(
         "partials/active_sessions.html",
         {"request": request, "sessions": sessions},
@@ -196,7 +313,12 @@ async def active_sessions(request: Request):
 @router.get("/api/stats/watchtime", response_class=HTMLResponse)
 async def watchtime_stats(request: Request, days: int = 30):
     """Get watchtime stats partial for HTMX."""
-    watchtime = await db.get_user_watchtime(days=days)
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+    watchtime = await db.get_user_watchtime(
+        days=days, user_id=user_id, device_name=device_name, media_type=media_type
+    )
     return templates.TemplateResponse(
         "partials/stats.html",
         {"request": request, "watchtime": watchtime},
@@ -206,7 +328,12 @@ async def watchtime_stats(request: Request, days: int = 30):
 @router.get("/api/stats/top-media", response_class=HTMLResponse)
 async def top_media_stats(request: Request, days: int = 30):
     """Get top media partial for HTMX."""
-    top_media = await db.get_top_media(days=days)
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+    top_media = await db.get_top_media(
+        days=days, user_id=user_id, device_name=device_name, media_type=media_type
+    )
     return templates.TemplateResponse(
         "partials/top_media.html",
         {"request": request, "top_media": top_media},
@@ -216,7 +343,12 @@ async def top_media_stats(request: Request, days: int = 30):
 @router.get("/api/stats/recent", response_class=HTMLResponse)
 async def recent_activity(request: Request):
     """Get recent activity partial for HTMX."""
-    recent = await db.get_recent_activity(limit=15)
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+    recent = await db.get_recent_activity(
+        limit=15, user_id=user_id, device_name=device_name, media_type=media_type
+    )
     return templates.TemplateResponse(
         "partials/recent_activity.html",
         {"request": request, "recent": recent},
@@ -224,16 +356,26 @@ async def recent_activity(request: Request):
 
 
 @router.get("/api/stats/hourly")
-async def hourly_stats(days: int = 30):
+async def hourly_stats(request: Request, days: int = 30):
     """Get hourly usage stats as JSON for charts."""
-    hourly = await db.get_hourly_stats(days=days)
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+    hourly = await db.get_hourly_stats(
+        days=days, user_id=user_id, device_name=device_name, media_type=media_type
+    )
     return [h.model_dump() for h in hourly]
 
 
 @router.get("/api/stats/devices")
-async def device_stats(days: int = 30):
+async def device_stats(request: Request, days: int = 30):
     """Get device stats as JSON."""
-    devices = await db.get_device_stats(days=days)
+    user_id = _normalize_filter(request.query_params.get("user_id"))
+    device_name = _normalize_filter(request.query_params.get("device_name"))
+    media_type = _normalize_filter(request.query_params.get("media_type"))
+    devices = await db.get_device_stats(
+        days=days, user_id=user_id, device_name=device_name, media_type=media_type
+    )
     return [d.model_dump() for d in devices]
 
 
