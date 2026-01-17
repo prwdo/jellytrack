@@ -1,0 +1,2 @@
+# Lint/format
+ruff>=0.6.0

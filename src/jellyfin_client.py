@@ -2,14 +2,13 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Optional, Callable, Awaitable
+from typing import Awaitable, Callable, Optional
 
 import websockets
-from websockets.exceptions import ConnectionClosed
 
 from .config import settings
 from .database import db
-from .models import Session, PlaybackEvent
+from .models import PlaybackEvent, Session
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +22,7 @@ class JellyfinWebSocketClient:
         self._session_durations: dict[str, int] = {}
         self._on_session_update: Optional[Callable[[], Awaitable[None]]] = None
 
-    def set_session_update_callback(
-        self, callback: Callable[[], Awaitable[None]]
-    ) -> None:
+    def set_session_update_callback(self, callback: Callable[[], Awaitable[None]]) -> None:
         """Set callback to be called when sessions are updated."""
         self._on_session_update = callback
 
@@ -60,10 +57,7 @@ class JellyfinWebSocketClient:
             logger.info("Connected to Jellyfin WebSocket")
 
             # Subscribe to session updates (every 2 seconds)
-            await ws.send(json.dumps({
-                "MessageType": "SessionsStart",
-                "Data": "0,2000"
-            }))
+            await ws.send(json.dumps({"MessageType": "SessionsStart", "Data": "0,2000"}))
             logger.info("Subscribed to session updates")
 
             # Start timeout checker
@@ -84,9 +78,7 @@ class JellyfinWebSocketClient:
         while True:
             await asyncio.sleep(60)
             try:
-                count = await db.timeout_stale_sessions(
-                    settings.session_timeout_minutes
-                )
+                count = await db.timeout_stale_sessions(settings.session_timeout_minutes)
                 if count > 0:
                     logger.info(f"Timed out {count} stale session(s)")
                     if self._on_session_update:
@@ -132,7 +124,6 @@ class JellyfinWebSocketClient:
 
             play_state = session_data.get("PlayState", {})
             position_ticks = play_state.get("PositionTicks", 0)
-            is_paused = play_state.get("IsPaused", False)
 
             # Calculate duration in seconds
             duration_seconds = position_ticks // 10_000_000
@@ -156,9 +147,7 @@ class JellyfinWebSocketClient:
                 )
                 await db.end_session(db_session.session_id, duration)
                 self._session_durations.pop(db_session.session_id, None)
-                logger.info(
-                    f"Session ended: {db_session.user_name} - {db_session.media_title}"
-                )
+                logger.info(f"Session ended: {db_session.user_name} - {db_session.media_title}")
 
         if self._on_session_update:
             await self._on_session_update()
@@ -208,9 +197,7 @@ class JellyfinWebSocketClient:
         if self._on_session_update:
             await self._on_session_update()
 
-    def _extract_playback_event(
-        self, session_data: dict, now_playing: dict
-    ) -> PlaybackEvent:
+    def _extract_playback_event(self, session_data: dict, now_playing: dict) -> PlaybackEvent:
         """Extract a PlaybackEvent from session and item data."""
         return PlaybackEvent(
             session_id=session_data.get("Id", ""),
@@ -249,8 +236,7 @@ class JellyfinWebSocketClient:
         await db.create_session(session)
         self._session_durations[event.session_id] = 0
         logger.info(
-            f"Session started: {event.user_name} - {event.item_name} "
-            f"on {event.device_name}"
+            f"Session started: {event.user_name} - {event.item_name} on {event.device_name}"
         )
 
 

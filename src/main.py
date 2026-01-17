@@ -99,7 +99,9 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # Import command
-    import_parser = subparsers.add_parser("import", help="Import historical data from Playback Reporting plugin")
+    import_parser = subparsers.add_parser(
+        "import", help="Import historical data from Playback Reporting plugin"
+    )
     import_parser.add_argument(
         "--days",
         type=int,
@@ -115,6 +117,7 @@ def main() -> None:
 
     if args.command == "import":
         from .importer import run_import
+
         count = asyncio.run(run_import(days=args.days))
         logger.info(f"Imported {count} sessions")
     else:

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -51,13 +52,13 @@ def format_duration_long(seconds: int) -> str:
 
 def timeago(dt) -> str:
     """Format datetime as relative time."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     if not dt:
         return "Unknown"
 
     # Make dt timezone-naive if it has timezone info
-    if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+    if hasattr(dt, "tzinfo") and dt.tzinfo is not None:
         dt = dt.replace(tzinfo=None)
 
     now = datetime.now()

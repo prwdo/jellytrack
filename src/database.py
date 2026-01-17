@@ -1,16 +1,11 @@
-import aiosqlite
 from datetime import datetime, timedelta
-from typing import Optional
 from pathlib import Path
+from typing import Optional
+
+import aiosqlite
 
 from .config import settings
-from .models import (
-    Session,
-    UserWatchtime,
-    TopMedia,
-    HourlyStats,
-    DeviceStats,
-)
+from .models import DeviceStats, HourlyStats, Session, TopMedia, UserWatchtime
 
 
 class Database:
@@ -60,9 +55,7 @@ class Database:
                 last_progress_update TIMESTAMP
             )
         """)
-        await self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)"
-        )
+        await self.conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(is_active)"
         )
@@ -143,9 +136,7 @@ class Database:
             return self._row_to_session(row)
         return None
 
-    async def update_session_progress(
-        self, session_id: str, duration_seconds: int
-    ) -> None:
+    async def update_session_progress(self, session_id: str, duration_seconds: int) -> None:
         """Update session progress timestamp and duration."""
         now = datetime.now()
         await self.conn.execute(
@@ -469,6 +460,7 @@ class Database:
 
     def _row_to_session(self, row: aiosqlite.Row) -> Session:
         """Convert a database row to a Session model."""
+
         def parse_dt(value: Optional[str], fallback: Optional[datetime]) -> datetime:
             if value:
                 return datetime.fromisoformat(value)
@@ -492,9 +484,7 @@ class Database:
             season_number=row["season_number"],
             episode_number=row["episode_number"],
             started_at=started_at,
-            ended_at=(
-                datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None
-            ),
+            ended_at=(datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None),
             play_duration_seconds=row["play_duration_seconds"],
             is_active=bool(row["is_active"]),
             last_progress_update=parse_dt(row["last_progress_update"], started_at),

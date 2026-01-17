@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -26,6 +27,7 @@ class Session(BaseModel):
 
 class PlaybackEvent(BaseModel):
     """Model for Jellyfin playback events."""
+
     session_id: str
     user_id: str
     user_name: str
@@ -44,6 +46,7 @@ class PlaybackEvent(BaseModel):
 
 class UserWatchtime(BaseModel):
     """Aggregated watchtime per user."""
+
     user_id: str
     user_name: str
     total_seconds: int
@@ -52,6 +55,7 @@ class UserWatchtime(BaseModel):
 
 class TopMedia(BaseModel):
     """Top watched media."""
+
     media_id: str
     media_title: str
     media_type: str
@@ -62,6 +66,7 @@ class TopMedia(BaseModel):
 
 class HourlyStats(BaseModel):
     """Usage stats by hour."""
+
     hour: int
     session_count: int
     total_seconds: int
@@ -69,6 +74,7 @@ class HourlyStats(BaseModel):
 
 class DeviceStats(BaseModel):
     """Device usage stats."""
+
     device_name: str
     client_name: str
     session_count: int

@@ -1,8 +1,6 @@
-import asyncio
 import hashlib
 import logging
 from datetime import datetime
-from typing import Optional
 
 import httpx
 
@@ -125,8 +123,8 @@ class PlaybackReportingImporter:
                         if se_part.startswith("s") and "e" in se_part:
                             s_idx = se_part.index("s")
                             e_idx = se_part.index("e")
-                            season_number = int(se_part[s_idx + 1:e_idx])
-                            episode_number = int(se_part[e_idx + 1:])
+                            season_number = int(se_part[s_idx + 1 : e_idx])
+                            episode_number = int(se_part[e_idx + 1 :])
                     except (ValueError, IndexError):
                         pass
 
