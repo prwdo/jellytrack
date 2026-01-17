@@ -72,15 +72,31 @@ class Database:
         await self.conn.commit()
 
     async def create_session(self, session: Session) -> int:
-        """Create a new playback session."""
+        """Create or update a playback session (UPSERT)."""
         cursor = await self.conn.execute(
             """
-            INSERT INTO sessions (
-                session_id, user_id, user_name, device_id, device_name,
-                client_name, media_id, media_title, media_type, series_name,
-                season_number, episode_number, started_at, ended_at,
-                play_duration_seconds, is_active, last_progress_update
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sessions (session_id, user_id, user_name, device_id, device_name,
+                                  client_name, media_id, media_title, media_type, series_name,
+                                  season_number, episode_number, started_at, ended_at,
+                                  play_duration_seconds, is_active, last_progress_update)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                user_name = excluded.user_name,
+                device_id = excluded.device_id,
+                device_name = excluded.device_name,
+                client_name = excluded.client_name,
+                media_id = excluded.media_id,
+                media_title = excluded.media_title,
+                media_type = excluded.media_type,
+                series_name = excluded.series_name,
+                season_number = excluded.season_number,
+                episode_number = excluded.episode_number,
+                started_at = excluded.started_at,
+                ended_at = excluded.ended_at,
+                play_duration_seconds = excluded.play_duration_seconds,
+                is_active = excluded.is_active,
+                last_progress_update = excluded.last_progress_update
             """,
             (
                 session.session_id,

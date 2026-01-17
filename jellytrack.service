@@ -4,19 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-User=alexander-hinz
-Group=alexander-hinz
-WorkingDirectory=/home/alexander-hinz/jellytrack
-Environment=PATH=/home/alexander-hinz/jellytrack/.venv/bin:/usr/bin
-EnvironmentFile=/home/alexander-hinz/jellytrack/.env
-ExecStart=/home/alexander-hinz/jellytrack/.venv/bin/python -m src.main
+User=stinz
+Group=stinz
+WorkingDirectory=/home/stinz/jellytrack
+Environment=PATH=/home/stinz/jellytrack/.venv/bin:/usr/bin
+EnvironmentFile=/home/stinz/jellytrack/.env
+ExecStart=/home/stinz/jellytrack/.venv/bin/python -m src.main
 Restart=always
 RestartSec=10
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=jellytrack
 
 [Install]
 WantedBy=multi-user.target
