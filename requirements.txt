@@ -1,0 +1,20 @@
+# Core
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Database
+aiosqlite>=0.19.0
+
+# WebSocket client
+websockets>=12.0
+
+# HTTP client
+httpx>=0.26.0
+
+# Templates
+jinja2>=3.1.0
+
+# Async utilities
+asyncio-atexit>=1.0.0

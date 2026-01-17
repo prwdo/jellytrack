@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Time Period Selector -->
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-gray-100">Dashboard</h1>
+        <div class="flex items-center space-x-2">
+            <span class="text-sm text-gray-400 mr-2">Time Period:</span>
+            <div class="inline-flex rounded-lg bg-gray-800 p-1">
+                <a href="/?days=7" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors {% if selected_days == 7 %}bg-purple-600 text-white{% else %}text-gray-400 hover:text-white hover:bg-gray-700{% endif %}">7D</a>
+                <a href="/?days=30" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors {% if selected_days == 30 %}bg-purple-600 text-white{% else %}text-gray-400 hover:text-white hover:bg-gray-700{% endif %}">30D</a>
+                <a href="/?days=90" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors {% if selected_days == 90 %}bg-purple-600 text-white{% else %}text-gray-400 hover:text-white hover:bg-gray-700{% endif %}">90D</a>
+                <a href="/?days=365" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors {% if selected_days == 365 %}bg-purple-600 text-white{% else %}text-gray-400 hover:text-white hover:bg-gray-700{% endif %}">1Y</a>
+                <a href="/?days=0" class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors {% if selected_days == 0 %}bg-purple-600 text-white{% else %}text-gray-400 hover:text-white hover:bg-gray-700{% endif %}">All</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            <div class="flex items-center">
+                <div class="p-2 bg-purple-900 rounded-lg">
+                    <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm text-gray-400">Total Watchtime</p>
+                    <p class="text-xl font-bold text-gray-100">{{ summary.total_seconds|duration_long }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            <div class="flex items-center">
+                <div class="p-2 bg-blue-900 rounded-lg">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm text-gray-400">Sessions</p>
+                    <p class="text-xl font-bold text-gray-100">{{ summary.total_sessions }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            <div class="flex items-center">
+                <div class="p-2 bg-green-900 rounded-lg">
+                    <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm text-gray-400">Active Users</p>
+                    <p class="text-xl font-bold text-gray-100">{{ summary.unique_users }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
+            <div class="flex items-center">
+                <div class="p-2 bg-yellow-900 rounded-lg">
+                    <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z"></path>
+                    </svg>
+                </div>
+                <div class="ml-4">
+                    <p class="text-sm text-gray-400">Unique Media</p>
+                    <p class="text-xl font-bold text-gray-100">{{ summary.unique_media }}</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Active Sessions -->
+    <section>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-2xl font-bold text-gray-100">Active Sessions</h2>
+            <span class="htmx-indicator text-purple-400">
+                <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </span>
+        </div>
+        <div id="active-sessions"
+             hx-get="/api/sessions/active"
+             hx-trigger="every 10s"
+             hx-indicator=".htmx-indicator">
+            {% include "partials/active_sessions.html" %}
+        </div>
+    </section>
+
+    <!-- Daily Activity Line Chart -->
+    <section class="bg-gray-800 rounded-lg p-6">
+        <h2 class="text-xl font-bold text-gray-100 mb-4">Daily Activity ({{ period_label }})</h2>
+        <div class="h-64">
+            <canvas id="dailyChart"></canvas>
+        </div>
+    </section>
+
+    <!-- Charts Row 1: Hourly + Content Types -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- Hourly Activity Bar Chart -->
+        <section class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-bold text-gray-100 mb-4">Hourly Activity ({{ period_label }})</h2>
+            <div class="h-48">
+                <canvas id="hourlyChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Content Types Pie Chart -->
+        <section class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-bold text-gray-100 mb-4">Content Types</h2>
+            <div class="h-48 flex items-center justify-center">
+                <canvas id="mediaTypeChart"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <!-- Charts Row 2: User Watchtime + Devices -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- User Watchtime Bar Chart -->
+        <section class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-bold text-gray-100 mb-4">User Watchtime (hours)</h2>
+            <div class="h-64">
+                <canvas id="userChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Devices Doughnut Chart -->
+        <section class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-bold text-gray-100 mb-4">Devices</h2>
+            <div class="h-64 flex items-center justify-center">
+                <canvas id="deviceChart"></canvas>
+            </div>
+        </section>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- User Watchtime List -->
+        <section class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-bold text-gray-100 mb-4">User Watchtime ({{ period_label }})</h2>
+            <div id="watchtime-stats"
+                 hx-get="/api/stats/watchtime?days={{ selected_days if selected_days > 0 else 3650 }}"
+                 hx-trigger="load, every 60s">
+                {% include "partials/stats.html" %}
+            </div>
+        </section>
+
+        <!-- Top Media -->
+        <section class="bg-gray-800 rounded-lg p-6">
+            <h2 class="text-xl font-bold text-gray-100 mb-4">Top Media ({{ period_label }})</h2>
+            <div id="top-media"
+                 hx-get="/api/stats/top-media?days={{ selected_days if selected_days > 0 else 3650 }}"
+                 hx-trigger="load, every 60s">
+                {% include "partials/top_media.html" %}
+            </div>
+        </section>
+    </div>
+
+    <!-- Recent Activity -->
+    <section class="bg-gray-800 rounded-lg p-6">
+        <h2 class="text-xl font-bold text-gray-100 mb-4">Recent Activity</h2>
+        <div id="recent-activity"
+             hx-get="/api/stats/recent"
+             hx-trigger="every 30s">
+            {% include "partials/recent_activity.html" %}
+        </div>
+    </section>
+</div>
+
+<script>
+// Chart.js default configuration for dark theme
+Chart.defaults.color = '#9CA3AF';
+Chart.defaults.borderColor = '#374151';
+
+// Hourly Activity Bar Chart
+const hourlyCtx = document.getElementById('hourlyChart').getContext('2d');
+new Chart(hourlyCtx, {
+    type: 'bar',
+    data: {
+        labels: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'],
+        datasets: [{
+            label: 'Sessions',
+            data: {{ hourly_data_json|safe }},
+            backgroundColor: 'rgba(147, 51, 234, 0.8)',
+            borderColor: 'rgba(147, 51, 234, 1)',
+            borderWidth: 1,
+            borderRadius: 4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            y: {
+                beginAtZero: true,
+                grid: { color: '#374151' }
+            },
+            x: {
+                grid: { display: false }
+            }
+        }
+    }
+});
+
+// Daily Activity Line Chart
+const dailyCtx = document.getElementById('dailyChart').getContext('2d');
+new Chart(dailyCtx, {
+    type: 'line',
+    data: {
+        labels: {{ daily_labels_json|safe }},
+        datasets: [{
+            label: 'Watch Hours',
+            data: {{ daily_hours_json|safe }},
+            borderColor: 'rgba(147, 51, 234, 1)',
+            backgroundColor: 'rgba(147, 51, 234, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 3,
+            pointHoverRadius: 6
+        }, {
+            label: 'Sessions',
+            data: {{ daily_sessions_json|safe }},
+            borderColor: 'rgba(59, 130, 246, 1)',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: false,
+            tension: 0.3,
+            pointRadius: 3,
+            pointHoverRadius: 6,
+            yAxisID: 'y1'
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+            mode: 'index',
+            intersect: false
+        },
+        plugins: {
+            legend: {
+                position: 'top',
+                labels: { usePointStyle: true }
+            }
+        },
+        scales: {
+            y: {
+                type: 'linear',
+                display: true,
+                position: 'left',
+                title: { display: true, text: 'Hours' },
+                grid: { color: '#374151' }
+            },
+            y1: {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: { display: true, text: 'Sessions' },
+                grid: { drawOnChartArea: false }
+            },
+            x: {
+                grid: { display: false },
+                ticks: {
+                    maxTicksLimit: 10
+                }
+            }
+        }
+    }
+});
+
+// Media Type Pie Chart
+const mediaTypeCtx = document.getElementById('mediaTypeChart').getContext('2d');
+new Chart(mediaTypeCtx, {
+    type: 'doughnut',
+    data: {
+        labels: {{ media_type_labels_json|safe }},
+        datasets: [{
+            data: {{ media_type_values_json|safe }},
+            backgroundColor: [
+                'rgba(34, 197, 94, 0.8)',
+                'rgba(59, 130, 246, 0.8)',
+                'rgba(234, 179, 8, 0.8)',
+                'rgba(239, 68, 68, 0.8)',
+                'rgba(147, 51, 234, 0.8)'
+            ],
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'right',
+                labels: { usePointStyle: true }
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        const hours = Math.round(context.raw / 3600);
+                        return context.label + ': ' + hours + 'h';
+                    }
+                }
+            }
+        }
+    }
+});
+
+// User Watchtime Horizontal Bar Chart
+const userCtx = document.getElementById('userChart').getContext('2d');
+new Chart(userCtx, {
+    type: 'bar',
+    data: {
+        labels: {{ user_labels_json|safe }},
+        datasets: [{
+            label: 'Hours',
+            data: {{ user_hours_json|safe }},
+            backgroundColor: [
+                'rgba(147, 51, 234, 0.8)',
+                'rgba(59, 130, 246, 0.8)',
+                'rgba(34, 197, 94, 0.8)',
+                'rgba(234, 179, 8, 0.8)',
+                'rgba(239, 68, 68, 0.8)',
+                'rgba(236, 72, 153, 0.8)',
+                'rgba(14, 165, 233, 0.8)',
+                'rgba(168, 85, 247, 0.8)',
+                'rgba(34, 211, 238, 0.8)',
+                'rgba(251, 146, 60, 0.8)'
+            ],
+            borderWidth: 0,
+            borderRadius: 4
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false }
+        },
+        scales: {
+            x: {
+                beginAtZero: true,
+                grid: { color: '#374151' },
+                title: { display: true, text: 'Hours' }
+            },
+            y: {
+                grid: { display: false }
+            }
+        }
+    }
+});
+
+// Devices Doughnut Chart
+const deviceCtx = document.getElementById('deviceChart').getContext('2d');
+new Chart(deviceCtx, {
+    type: 'doughnut',
+    data: {
+        labels: {{ device_labels_json|safe }},
+        datasets: [{
+            data: {{ device_values_json|safe }},
+            backgroundColor: [
+                'rgba(147, 51, 234, 0.8)',
+                'rgba(59, 130, 246, 0.8)',
+                'rgba(34, 197, 94, 0.8)',
+                'rgba(234, 179, 8, 0.8)',
+                'rgba(239, 68, 68, 0.8)',
+                'rgba(236, 72, 153, 0.8)',
+                'rgba(14, 165, 233, 0.8)',
+                'rgba(168, 85, 247, 0.8)'
+            ],
+            borderWidth: 0
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: {
+                position: 'right',
+                labels: { usePointStyle: true }
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        const hours = Math.round(context.raw / 3600);
+                        return context.label + ': ' + hours + 'h';
+                    }
+                }
+            }
+        }
+    }
+});
+</script>
+{% endblock %}

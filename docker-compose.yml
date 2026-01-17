@@ -1,0 +1,17 @@
+services:
+  jellytrack:
+    build: .
+    container_name: jellytrack
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - JELLYFIN_URL=${JELLYFIN_URL}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      - DATABASE_PATH=/app/data/jellytrack.db
+      - DASHBOARD_PORT=8085
+      - SESSION_TIMEOUT_MINUTES=5
+    env_file:
+      - .env

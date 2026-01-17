@@ -1,0 +1,22 @@
+{% if watchtime %}
+<div class="space-y-3">
+    {% for user in watchtime %}
+    <a href="/user/{{ user.user_id }}" class="flex items-center justify-between hover:bg-gray-700 rounded-lg p-2 -m-2 transition-colors">
+        <div class="flex items-center min-w-0">
+            <div class="w-8 h-8 rounded-full bg-purple-900 flex items-center justify-center flex-shrink-0">
+                <span class="text-sm font-medium text-purple-300">{{ user.user_name[0]|upper }}</span>
+            </div>
+            <div class="ml-3 min-w-0">
+                <p class="text-sm font-medium text-gray-100 truncate hover:text-purple-400">{{ user.user_name }}</p>
+                <p class="text-xs text-gray-500">{{ user.session_count }} sessions</p>
+            </div>
+        </div>
+        <span class="text-sm font-medium text-purple-400 flex-shrink-0 ml-4">
+            {{ user.total_seconds|duration }}
+        </span>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-gray-500 text-center py-4">No watchtime data yet</p>
+{% endif %}
