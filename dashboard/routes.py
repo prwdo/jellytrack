@@ -179,12 +179,6 @@ async def index(request: Request, days: int = 30):
         device_name=device_name,
         media_type=media_type,
     )
-    pause_by_device = await db.get_pause_ratio_by_device(
-        days=query_days,
-        user_id=user_id,
-        device_name=device_name,
-        media_type=media_type,
-    )
     series_days = min(query_days, 90)
     series_daily = await db.get_series_daily_totals(
         days=series_days,
@@ -192,7 +186,9 @@ async def index(request: Request, days: int = 30):
         device_name=device_name,
         media_type=media_type,
     )
-    metrics_days = min(query_days, settings.retention_days)
+    metrics_days = query_days if settings.retention_days <= 0 else min(
+        query_days, settings.retention_days
+    )
     sessions_for_metrics = await db.get_sessions_for_metrics(
         days=metrics_days,
         user_id=user_id,
@@ -297,50 +293,6 @@ async def index(request: Request, days: int = 30):
     if current_day is not None:
         concurrent_labels.append(current_day)
         concurrent_peaks.append(current_peak)
-
-    # Completion rate by media type (proxy via max observed position)
-    media_max_position: dict[str, int] = {}
-    for session in sessions_for_metrics:
-        if session["is_active"]:
-            continue
-        media_id = session["media_id"] or ""
-        if not media_id:
-            continue
-        media_max_position[media_id] = max(
-            media_max_position.get(media_id, 0), session["last_position_seconds"]
-        )
-    completion_totals: dict[str, dict[str, int]] = {}
-    for session in sessions_for_metrics:
-        if session["is_active"]:
-            continue
-        media_id = session["media_id"] or ""
-        if not media_id:
-            continue
-        max_position = media_max_position.get(media_id, 0)
-        if max_position < 600:
-            continue
-        media_type_key = session["media_type"] or "Other"
-        completion_totals.setdefault(media_type_key, {"total": 0, "completed": 0})
-        completion_totals[media_type_key]["total"] += 1
-        if session["last_position_seconds"] >= max_position * 0.8:
-            completion_totals[media_type_key]["completed"] += 1
-    completion_labels = list(completion_totals.keys())
-    completion_rates = []
-    for key in completion_labels:
-        totals = completion_totals[key]
-        if totals["total"] <= 0:
-            completion_rates.append(0)
-        else:
-            completion_rates.append(round((totals["completed"] / totals["total"]) * 100, 1))
-
-    # Pause ratio by device (hours)
-    pause_devices = pause_by_device[:8]
-    pause_device_labels = [
-        (f"{d['device_name']} ({d['client_name']})" if d["client_name"] else d["device_name"])
-        for d in pause_devices
-    ]
-    pause_play_hours = [round(d["play_seconds"] / 3600, 1) for d in pause_devices]
-    pause_paused_hours = [round(d["paused_seconds"] / 3600, 1) for d in pause_devices]
 
     # Series trends (top 5 series)
     series_totals: dict[str, int] = {}
@@ -484,11 +436,6 @@ async def index(request: Request, days: int = 30):
             "length_counts_json": json.dumps(length_counts),
             "concurrent_labels_json": json.dumps(concurrent_labels),
             "concurrent_counts_json": json.dumps(concurrent_peaks),
-            "completion_labels_json": json.dumps(completion_labels),
-            "completion_rates_json": json.dumps(completion_rates),
-            "pause_device_labels_json": json.dumps(pause_device_labels),
-            "pause_play_hours_json": json.dumps(pause_play_hours),
-            "pause_paused_hours_json": json.dumps(pause_paused_hours),
             "series_labels_json": json.dumps(series_labels),
             "series_datasets_json": json.dumps(series_datasets),
         },

@@ -449,6 +449,43 @@ class Database:
         if self._include_aggregates(days):
             cursor = await self.conn.execute(
                 f"""
+                WITH base AS (
+                    SELECT
+                        CASE
+                            WHEN media_type = 'Episode' AND series_name IS NOT NULL
+                                THEN series_name
+                            ELSE media_id
+                        END as media_id,
+                        CASE
+                            WHEN media_type = 'Episode' AND series_name IS NOT NULL
+                                THEN series_name
+                            ELSE media_title
+                        END as media_title,
+                        media_type,
+                        series_name,
+                        play_duration_seconds as total_seconds,
+                        1 as play_count
+                    FROM sessions
+                    WHERE started_at >= ?{filters}
+                    UNION ALL
+                    SELECT
+                        CASE
+                            WHEN media_type = 'Episode' AND series_name IS NOT NULL
+                                THEN series_name
+                            ELSE media_id
+                        END as media_id,
+                        CASE
+                            WHEN media_type = 'Episode' AND series_name IS NOT NULL
+                                THEN series_name
+                            ELSE media_title
+                        END as media_title,
+                        media_type,
+                        series_name,
+                        play_seconds as total_seconds,
+                        session_count as play_count
+                    FROM session_aggregates
+                    WHERE date >= ?{filters}
+                )
                 SELECT
                     media_id,
                     media_title,
@@ -456,29 +493,7 @@ class Database:
                     series_name,
                     SUM(total_seconds) as total_seconds,
                     SUM(play_count) as play_count
-                FROM (
-                    SELECT
-                        media_id,
-                        media_title,
-                        media_type,
-                        series_name,
-                        SUM(play_duration_seconds) as total_seconds,
-                        COUNT(*) as play_count
-                    FROM sessions
-                    WHERE started_at >= ?{filters}
-                    GROUP BY media_id, media_title, media_type, series_name
-                    UNION ALL
-                    SELECT
-                        media_id,
-                        media_title,
-                        media_type,
-                        series_name,
-                        SUM(play_seconds) as total_seconds,
-                        SUM(session_count) as play_count
-                    FROM session_aggregates
-                    WHERE date >= ?{filters}
-                    GROUP BY media_id, media_title, media_type, series_name
-                )
+                FROM base
                 GROUP BY media_id, media_title, media_type, series_name
                 ORDER BY total_seconds DESC
                 LIMIT ?
@@ -488,15 +503,33 @@ class Database:
         else:
             cursor = await self.conn.execute(
                 f"""
+                WITH base AS (
+                    SELECT
+                        CASE
+                            WHEN media_type = 'Episode' AND series_name IS NOT NULL
+                                THEN series_name
+                            ELSE media_id
+                        END as media_id,
+                        CASE
+                            WHEN media_type = 'Episode' AND series_name IS NOT NULL
+                                THEN series_name
+                            ELSE media_title
+                        END as media_title,
+                        media_type,
+                        series_name,
+                        play_duration_seconds as total_seconds,
+                        1 as play_count
+                    FROM sessions
+                    WHERE started_at >= ?{filters}
+                )
                 SELECT
                     media_id,
                     media_title,
                     media_type,
                     series_name,
-                    SUM(play_duration_seconds) as total_seconds,
-                    COUNT(*) as play_count
-                FROM sessions
-                WHERE started_at >= ?{filters}
+                    SUM(total_seconds) as total_seconds,
+                    SUM(play_count) as play_count
+                FROM base
                 GROUP BY media_id, media_title, media_type, series_name
                 ORDER BY total_seconds DESC
                 LIMIT ?

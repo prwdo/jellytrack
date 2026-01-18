@@ -224,5 +224,4 @@ def test_index_route_renders_metrics_charts(monkeypatch):
     body = response.text
     assert "const heatmapMax = 3" in body
     assert "data: [1, 1, 0, 1, 1, 1]" in body
-    assert "data: [75.0, 100.0]" in body
     assert "Series A" in body

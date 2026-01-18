@@ -288,22 +288,6 @@
         </section>
     </div>
 
-    <!-- Completion + Pause Ratio -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <section class="bg-gray-800 rounded-lg p-6">
-            <h2 class="text-xl font-bold text-gray-100 mb-4">Completion Rate by Media Type</h2>
-            <div class="h-64">
-                <canvas id="completionChart"></canvas>
-            </div>
-        </section>
-        <section class="bg-gray-800 rounded-lg p-6">
-            <h2 class="text-xl font-bold text-gray-100 mb-4">Pause Ratio by Device</h2>
-            <div class="h-64">
-                <canvas id="pauseChart"></canvas>
-            </div>
-        </section>
-    </div>
-
     <!-- Series Trends -->
     <section class="bg-gray-800 rounded-lg p-6">
         <h2 class="text-xl font-bold text-gray-100 mb-4">Top Series Over Time</h2>
@@ -699,94 +683,6 @@ if (lengthCanvas) {
             },
             x: {
                 grid: { display: false }
-            }
-        }
-    }
-    });
-}
-
-// Completion Rate by Media Type
-const completionCanvas = document.getElementById('completionChart');
-if (completionCanvas) {
-    const completionCtx = completionCanvas.getContext('2d');
-    new Chart(completionCtx, {
-    type: 'bar',
-    data: {
-        labels: {{ completion_labels_json|safe }},
-        datasets: [{
-            label: 'Completion %',
-            data: {{ completion_rates_json|safe }},
-            backgroundColor: 'rgba(234, 179, 8, 0.8)',
-            borderRadius: 4,
-            borderWidth: 0
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { display: false },
-            tooltip: {
-                callbacks: {
-                    label: function(context) {
-                        return `${context.raw}%`;
-                    }
-                }
-            }
-        },
-        scales: {
-            y: {
-                beginAtZero: true,
-                max: 100,
-                grid: { color: '#374151' },
-                ticks: {
-                    callback: function(value) { return `${value}%`; }
-                }
-            },
-            x: {
-                grid: { display: false }
-            }
-        }
-    }
-    });
-}
-
-// Pause Ratio by Device (stacked hours)
-const pauseCanvas = document.getElementById('pauseChart');
-if (pauseCanvas) {
-    const pauseCtx = pauseCanvas.getContext('2d');
-    new Chart(pauseCtx, {
-    type: 'bar',
-    data: {
-        labels: {{ pause_device_labels_json|safe }},
-        datasets: [{
-            label: 'Play Hours',
-            data: {{ pause_play_hours_json|safe }},
-            backgroundColor: 'rgba(147, 51, 234, 0.8)',
-            borderRadius: 3
-        }, {
-            label: 'Paused Hours',
-            data: {{ pause_paused_hours_json|safe }},
-            backgroundColor: 'rgba(239, 68, 68, 0.8)',
-            borderRadius: 3
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-            legend: { position: 'top' }
-        },
-        scales: {
-            x: {
-                stacked: true,
-                grid: { display: false }
-            },
-            y: {
-                stacked: true,
-                beginAtZero: true,
-                grid: { color: '#374151' },
-                title: { display: true, text: 'Hours' }
             }
         }
     }
