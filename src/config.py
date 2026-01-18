@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -11,10 +11,9 @@ class Settings(BaseSettings):
     session_timeout_minutes: int = 5
     retention_days: int = 180
     aggregation_interval_hours: int = 24
+    excluded_user_names: str = "admin"
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @property
     def jellyfin_ws_url(self) -> str:
@@ -28,6 +27,11 @@ class Settings(BaseSettings):
         path = Path(self.database_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
+
+    @property
+    def excluded_user_names_list(self) -> list[str]:
+        """Get excluded user names as a clean list."""
+        return [name.strip() for name in self.excluded_user_names.split(",") if name.strip()]
 
 
 settings = Settings()

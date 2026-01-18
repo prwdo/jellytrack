@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
+from src.config import settings
 from src.database import db
 from src.jellyfin_client import jellyfin_client
 
@@ -172,6 +173,32 @@ async def index(request: Request, days: int = 30):
         device_name=device_name,
         media_type=media_type,
     )
+    heatmap = await db.get_hourly_weekday_heatmap(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    pause_by_device = await db.get_pause_ratio_by_device(
+        days=query_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    series_days = min(query_days, 90)
+    series_daily = await db.get_series_daily_totals(
+        days=series_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
+    metrics_days = min(query_days, settings.retention_days)
+    sessions_for_metrics = await db.get_sessions_for_metrics(
+        days=metrics_days,
+        user_id=user_id,
+        device_name=device_name,
+        media_type=media_type,
+    )
     pause_stats = await db.get_pause_stats(
         days=query_days,
         user_id=user_id,
@@ -190,6 +217,178 @@ async def index(request: Request, days: int = 30):
     daily_labels = [d["date"] for d in daily]
     daily_sessions = [d["session_count"] for d in daily]
     daily_hours = [round(d["total_seconds"] / 3600, 1) for d in daily]
+
+    # Heatmap data (weekday x hour)
+    heatmap_points = []
+    heatmap_max = 0
+    heatmap_lookup = {(h["weekday"], h["hour"]): h["session_count"] for h in heatmap}
+    for weekday in range(7):
+        for hour in range(24):
+            count = heatmap_lookup.get((weekday, hour), 0)
+            heatmap_max = max(heatmap_max, count)
+            heatmap_points.append({"x": hour, "y": weekday, "v": count})
+
+    # Session length distribution
+    length_bins = [
+        ("<5m", 0, 5 * 60),
+        ("5-15m", 5 * 60, 15 * 60),
+        ("15-30m", 15 * 60, 30 * 60),
+        ("30-60m", 30 * 60, 60 * 60),
+        ("1-2h", 60 * 60, 120 * 60),
+        ("2h+", 120 * 60, None),
+    ]
+    length_labels = [label for label, _, _ in length_bins]
+    length_counts = [0 for _ in length_bins]
+    for session in sessions_for_metrics:
+        if session["is_active"]:
+            continue
+        total_seconds = session["play_seconds"] + session["paused_seconds"]
+        if total_seconds <= 0:
+            continue
+        for idx, (_, min_seconds, max_seconds) in enumerate(length_bins):
+            if max_seconds is None and total_seconds >= min_seconds:
+                length_counts[idx] += 1
+                break
+            if max_seconds is not None and min_seconds <= total_seconds < max_seconds:
+                length_counts[idx] += 1
+                break
+
+    # Concurrent sessions (daily peak)
+    concurrent_days = min(metrics_days, 90)
+    now = datetime.now()
+    since = now - timedelta(days=concurrent_days)
+    since_hour = since.replace(minute=0, second=0, microsecond=0)
+    total_hours = int((now - since_hour).total_seconds() // 3600) + 1
+    concurrent_hours = [0 for _ in range(total_hours)]
+    for session in sessions_for_metrics:
+        started_at = datetime.fromisoformat(session["started_at"])
+        if session["ended_at"]:
+            ended_at = datetime.fromisoformat(session["ended_at"])
+        elif session["last_progress_update"]:
+            ended_at = datetime.fromisoformat(session["last_progress_update"])
+        else:
+            ended_at = now
+        if session["is_active"]:
+            ended_at = now
+        if ended_at < since_hour or started_at > now:
+            continue
+        start = max(started_at, since_hour)
+        end = min(ended_at, now)
+        start_idx = int((start - since_hour).total_seconds() // 3600)
+        end_idx = int((end - since_hour).total_seconds() // 3600)
+        for idx in range(start_idx, end_idx + 1):
+            concurrent_hours[idx] += 1
+    concurrent_labels = []
+    concurrent_peaks = []
+    current_day = None
+    current_peak = 0
+    for idx, count in enumerate(concurrent_hours):
+        bucket_time = since_hour + timedelta(hours=idx)
+        day_label = bucket_time.date().isoformat()
+        if current_day is None:
+            current_day = day_label
+        if day_label != current_day:
+            concurrent_labels.append(current_day)
+            concurrent_peaks.append(current_peak)
+            current_day = day_label
+            current_peak = count
+        else:
+            current_peak = max(current_peak, count)
+    if current_day is not None:
+        concurrent_labels.append(current_day)
+        concurrent_peaks.append(current_peak)
+
+    # Completion rate by media type (proxy via max observed position)
+    media_max_position: dict[str, int] = {}
+    for session in sessions_for_metrics:
+        if session["is_active"]:
+            continue
+        media_id = session["media_id"] or ""
+        if not media_id:
+            continue
+        media_max_position[media_id] = max(
+            media_max_position.get(media_id, 0), session["last_position_seconds"]
+        )
+    completion_totals: dict[str, dict[str, int]] = {}
+    for session in sessions_for_metrics:
+        if session["is_active"]:
+            continue
+        media_id = session["media_id"] or ""
+        if not media_id:
+            continue
+        max_position = media_max_position.get(media_id, 0)
+        if max_position < 600:
+            continue
+        media_type_key = session["media_type"] or "Other"
+        completion_totals.setdefault(media_type_key, {"total": 0, "completed": 0})
+        completion_totals[media_type_key]["total"] += 1
+        if session["last_position_seconds"] >= max_position * 0.8:
+            completion_totals[media_type_key]["completed"] += 1
+    completion_labels = list(completion_totals.keys())
+    completion_rates = []
+    for key in completion_labels:
+        totals = completion_totals[key]
+        if totals["total"] <= 0:
+            completion_rates.append(0)
+        else:
+            completion_rates.append(round((totals["completed"] / totals["total"]) * 100, 1))
+
+    # Pause ratio by device (hours)
+    pause_devices = pause_by_device[:8]
+    pause_device_labels = [
+        (f"{d['device_name']} ({d['client_name']})" if d["client_name"] else d["device_name"])
+        for d in pause_devices
+    ]
+    pause_play_hours = [round(d["play_seconds"] / 3600, 1) for d in pause_devices]
+    pause_paused_hours = [round(d["paused_seconds"] / 3600, 1) for d in pause_devices]
+
+    # Series trends (top 5 series)
+    series_totals: dict[str, int] = {}
+    for row in series_daily:
+        series_totals[row["series_name"]] = (
+            series_totals.get(row["series_name"], 0) + row["total_seconds"]
+        )
+    top_series = [
+        name for name, _ in sorted(series_totals.items(), key=lambda i: i[1], reverse=True)[:5]
+    ]
+    series_labels = daily_labels
+    series_index = {label: idx for idx, label in enumerate(series_labels)}
+    series_data_map = {name: [0 for _ in series_labels] for name in top_series}
+    for row in series_daily:
+        name = row["series_name"]
+        if name not in series_data_map:
+            continue
+        idx = series_index.get(row["date"])
+        if idx is None:
+            continue
+        series_data_map[name][idx] = round(row["total_seconds"] / 3600, 2)
+    series_colors = [
+        "rgba(59, 130, 246, 0.35)",
+        "rgba(34, 197, 94, 0.35)",
+        "rgba(234, 179, 8, 0.35)",
+        "rgba(239, 68, 68, 0.35)",
+        "rgba(147, 51, 234, 0.35)",
+    ]
+    series_border_colors = [
+        "rgba(59, 130, 246, 0.9)",
+        "rgba(34, 197, 94, 0.9)",
+        "rgba(234, 179, 8, 0.9)",
+        "rgba(239, 68, 68, 0.9)",
+        "rgba(147, 51, 234, 0.9)",
+    ]
+    series_datasets = []
+    for idx, name in enumerate(top_series):
+        series_datasets.append(
+            {
+                "label": name,
+                "data": series_data_map[name],
+                "borderColor": series_border_colors[idx % len(series_border_colors)],
+                "backgroundColor": series_colors[idx % len(series_colors)],
+                "fill": True,
+                "tension": 0.3,
+                "pointRadius": 2,
+            }
+        )
 
     # Media types for pie chart
     media_type_labels = [mt["media_type"] for mt in media_types]
@@ -240,6 +439,7 @@ async def index(request: Request, days: int = 30):
         }
 
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
             "request": request,
@@ -278,6 +478,19 @@ async def index(request: Request, days: int = 30):
             "user_hours_json": json.dumps(user_hours),
             "device_labels_json": json.dumps(device_labels),
             "device_values_json": json.dumps(device_values),
+            "heatmap_json": json.dumps(heatmap_points),
+            "heatmap_max": heatmap_max,
+            "length_labels_json": json.dumps(length_labels),
+            "length_counts_json": json.dumps(length_counts),
+            "concurrent_labels_json": json.dumps(concurrent_labels),
+            "concurrent_counts_json": json.dumps(concurrent_peaks),
+            "completion_labels_json": json.dumps(completion_labels),
+            "completion_rates_json": json.dumps(completion_rates),
+            "pause_device_labels_json": json.dumps(pause_device_labels),
+            "pause_play_hours_json": json.dumps(pause_play_hours),
+            "pause_paused_hours_json": json.dumps(pause_paused_hours),
+            "series_labels_json": json.dumps(series_labels),
+            "series_datasets_json": json.dumps(series_datasets),
         },
     )
 
@@ -287,6 +500,7 @@ async def user_detail(request: Request, user_id: str):
     """User detail page."""
     user_stats = await db.get_user_stats(user_id)
     return templates.TemplateResponse(
+        request,
         "user.html",
         {
             "request": request,
@@ -305,6 +519,7 @@ async def active_sessions(request: Request):
         user_id=user_id, device_name=device_name, media_type=media_type
     )
     return templates.TemplateResponse(
+        request,
         "partials/active_sessions.html",
         {"request": request, "sessions": sessions},
     )
@@ -320,6 +535,7 @@ async def watchtime_stats(request: Request, days: int = 30):
         days=days, user_id=user_id, device_name=device_name, media_type=media_type
     )
     return templates.TemplateResponse(
+        request,
         "partials/stats.html",
         {"request": request, "watchtime": watchtime},
     )
@@ -335,6 +551,7 @@ async def top_media_stats(request: Request, days: int = 30):
         days=days, user_id=user_id, device_name=device_name, media_type=media_type
     )
     return templates.TemplateResponse(
+        request,
         "partials/top_media.html",
         {"request": request, "top_media": top_media},
     )
@@ -350,6 +567,7 @@ async def recent_activity(request: Request):
         limit=15, user_id=user_id, device_name=device_name, media_type=media_type
     )
     return templates.TemplateResponse(
+        request,
         "partials/recent_activity.html",
         {"request": request, "recent": recent},
     )

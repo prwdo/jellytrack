@@ -131,8 +131,8 @@ class JellyfinWebSocketClient:
             active_session_ids.add(session_id)
 
             play_state = session_data.get("PlayState", {})
-            position_ticks = play_state.get("PositionTicks", 0)
-            is_paused = play_state.get("IsPaused", False)
+            position_ticks = play_state.get("PositionTicks") or 0
+            is_paused = bool(play_state.get("IsPaused", False))
 
             # Calculate duration in seconds
             duration_seconds = position_ticks // 10_000_000
@@ -193,9 +193,9 @@ class JellyfinWebSocketClient:
             return
 
         play_state = data.get("PlayState", {})
-        position_ticks = play_state.get("PositionTicks", 0)
+        position_ticks = play_state.get("PositionTicks") or 0
         duration_seconds = position_ticks // 10_000_000
-        is_paused = play_state.get("IsPaused", False)
+        is_paused = bool(play_state.get("IsPaused", False))
         existing = await db.get_active_session(session_id)
         if existing:
             await self._finalize_session(existing, datetime.now(), duration_seconds, is_paused)
