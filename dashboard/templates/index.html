@@ -265,7 +265,10 @@
         <h2 class="text-xl font-bold text-gray-100 mb-4">Weekly Hour Heatmap</h2>
         <div class="flex items-start gap-3 h-72">
             <div id="heatmapLabels" class="flex flex-col justify-between text-xs text-gray-500 h-full"></div>
-            <div id="heatmapGrid" class="grid gap-1 flex-1 h-full"></div>
+            <div class="flex flex-col flex-1 h-full gap-2">
+                <div id="heatmapHours" class="grid gap-1 text-[10px] text-gray-500"></div>
+                <div id="heatmapGrid" class="grid gap-1 flex-1"></div>
+            </div>
         </div>
     </section>
 
@@ -591,6 +594,7 @@ if (deviceCanvas) {
 // Weekly Hour Heatmap
 const heatmapGrid = document.getElementById('heatmapGrid');
 const heatmapLabels = document.getElementById('heatmapLabels');
+const heatmapHours = document.getElementById('heatmapHours');
 const heatmapMax = {{ heatmap_max }};
 const heatmapDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 if (heatmapGrid) {
@@ -615,6 +619,15 @@ if (heatmapGrid) {
             const label = document.createElement('div');
             label.textContent = day;
             heatmapLabels.appendChild(label);
+        }
+    }
+    if (heatmapHours) {
+        heatmapHours.style.gridTemplateColumns = 'repeat(24, minmax(0, 1fr))';
+        for (let hour = 0; hour < 24; hour += 1) {
+            const label = document.createElement('div');
+            label.className = 'text-center';
+            label.textContent = hour.toString().padStart(2, '0');
+            heatmapHours.appendChild(label);
         }
     }
 }
