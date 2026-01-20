@@ -214,13 +214,15 @@ async def index(request: Request, days: int = 30):
     daily_sessions = [d["session_count"] for d in daily]
     daily_hours = [round(d["total_seconds"] / 3600, 1) for d in daily]
 
-    # Heatmap data (weekday x hour)
+    # Heatmap data (weekday x hour) - Monday as first day
     heatmap_points = []
     heatmap_max = 0
     heatmap_lookup = {(h["weekday"], h["hour"]): h["watch_seconds"] for h in heatmap}
     for weekday in range(7):
         for hour in range(24):
-            count = heatmap_lookup.get((weekday, hour), 0)
+            # Convert from Sunday=0 to Monday=0: (weekday + 6) % 7
+            db_weekday = (weekday + 1) % 7
+            count = heatmap_lookup.get((db_weekday, hour), 0)
             heatmap_max = max(heatmap_max, count)
             heatmap_points.append({"x": hour, "y": weekday, "v": count})
 
