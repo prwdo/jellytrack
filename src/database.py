@@ -760,7 +760,7 @@ class Database:
         device_name: Optional[str] = None,
         media_type: Optional[str] = None,
     ) -> list[dict]:
-        """Get session counts per weekday/hour."""
+        """Get watchtime per weekday/hour (seconds)."""
         since = datetime.now() - timedelta(days=days)
         filters, params = self._build_filter_clause(user_id, device_name, media_type)
         if self._include_aggregates(days):
@@ -769,12 +769,12 @@ class Database:
                 SELECT
                     weekday,
                     hour,
-                    SUM(session_count) as session_count
+                    SUM(play_seconds) as watch_seconds
                 FROM (
                     SELECT
                         CAST(strftime('%w', started_at) AS INTEGER) as weekday,
                         CAST(strftime('%H', started_at) AS INTEGER) as hour,
-                        COUNT(*) as session_count
+                        SUM(play_duration_seconds) as play_seconds
                     FROM sessions
                     WHERE started_at >= ?{filters}
                     GROUP BY weekday, hour
@@ -782,7 +782,7 @@ class Database:
                     SELECT
                         CAST(strftime('%w', date) AS INTEGER) as weekday,
                         hour,
-                        SUM(session_count) as session_count
+                        SUM(play_seconds) as play_seconds
                     FROM session_aggregates
                     WHERE date >= ?{filters}
                     GROUP BY weekday, hour
@@ -798,7 +798,7 @@ class Database:
                 SELECT
                     CAST(strftime('%w', started_at) AS INTEGER) as weekday,
                     CAST(strftime('%H', started_at) AS INTEGER) as hour,
-                    COUNT(*) as session_count
+                    SUM(play_duration_seconds) as watch_seconds
                 FROM sessions
                 WHERE started_at >= ?{filters}
                 GROUP BY weekday, hour
@@ -811,7 +811,7 @@ class Database:
             {
                 "weekday": row["weekday"],
                 "hour": row["hour"],
-                "session_count": row["session_count"] or 0,
+                "watch_seconds": row["watch_seconds"] or 0,
             }
             for row in rows
         ]

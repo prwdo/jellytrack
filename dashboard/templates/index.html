@@ -262,7 +262,7 @@
 
     <!-- Usage Heatmap -->
     <section class="bg-gray-800 rounded-lg p-6">
-        <h2 class="text-xl font-bold text-gray-100 mb-4">Weekly Hour Heatmap</h2>
+        <h2 class="text-xl font-bold text-gray-100 mb-4">Weekly Watchtime Heatmap</h2>
         <div class="flex items-start gap-3 h-72">
             <div id="heatmapLabels" class="flex flex-col justify-between text-xs text-gray-500 h-full"></div>
             <div class="flex flex-col flex-1 h-full gap-2">
@@ -613,10 +613,11 @@ if (heatmapGrid) {
             cell.className = 'rounded-sm';
             cell.style.backgroundColor = `rgba(147, 51, 234, ${alpha})`;
             const label = `${heatmapDays[row]} ${col.toString().padStart(2, '0')}:00`;
-            const plural = value === 1 ? 'session' : 'sessions';
-            cell.title = `${label} - ${value} ${plural}`;
+            const hours = value / 3600;
+            const hoursLabel = `${hours.toFixed(1)}h`;
+            cell.title = `${label} - ${hoursLabel}`;
             cell.addEventListener('mouseenter', (event) => {
-                tooltip.textContent = `${label} · ${value} ${plural}`;
+                tooltip.textContent = `${label} · ${hoursLabel}`;
                 tooltip.classList.remove('hidden');
                 const gridRect = heatmapGrid.getBoundingClientRect();
                 const tipRect = tooltip.getBoundingClientRect();

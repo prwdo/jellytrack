@@ -87,8 +87,8 @@ class _DummyDBMetrics(_DummyDB):
 
     async def get_hourly_weekday_heatmap(self, *_args, **_kwargs):
         return [
-            {"weekday": 1, "hour": 10, "session_count": 3},
-            {"weekday": 5, "hour": 21, "session_count": 1},
+            {"weekday": 1, "hour": 10, "watch_seconds": 10800},
+            {"weekday": 5, "hour": 21, "watch_seconds": 3600},
         ]
 
     async def get_pause_ratio_by_device(self, *_args, **_kwargs):
@@ -222,6 +222,6 @@ def test_index_route_renders_metrics_charts(monkeypatch):
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
-    assert "const heatmapMax = 3" in body
+    assert "const heatmapMax = 10800" in body
     assert "data: [1, 1, 0, 1, 1, 1]" in body
     assert "Series A" in body

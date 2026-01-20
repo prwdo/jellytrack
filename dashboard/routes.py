@@ -186,8 +186,8 @@ async def index(request: Request, days: int = 30):
         device_name=device_name,
         media_type=media_type,
     )
-    metrics_days = query_days if settings.retention_days <= 0 else min(
-        query_days, settings.retention_days
+    metrics_days = (
+        query_days if settings.retention_days <= 0 else min(query_days, settings.retention_days)
     )
     sessions_for_metrics = await db.get_sessions_for_metrics(
         days=metrics_days,
@@ -217,7 +217,7 @@ async def index(request: Request, days: int = 30):
     # Heatmap data (weekday x hour)
     heatmap_points = []
     heatmap_max = 0
-    heatmap_lookup = {(h["weekday"], h["hour"]): h["session_count"] for h in heatmap}
+    heatmap_lookup = {(h["weekday"], h["hour"]): h["watch_seconds"] for h in heatmap}
     for weekday in range(7):
         for hour in range(24):
             count = heatmap_lookup.get((weekday, hour), 0)
