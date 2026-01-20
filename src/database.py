@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -6,6 +7,8 @@ import aiosqlite
 
 from .config import settings
 from .models import DeviceStats, HourlyStats, Session, TopMedia, UserWatchtime
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -344,8 +347,12 @@ class Database:
             )
             await self.conn.commit()
             return cursor.rowcount
-        except Exception:
-            await self.conn.execute("ROLLBACK")
+        except Exception as e:
+            logger.error(f"Aggregation failed, rolling back: {e}")
+            try:
+                await self.conn.execute("ROLLBACK")
+            except Exception as rollback_error:
+                logger.error(f"Rollback also failed: {rollback_error}")
             raise
 
     async def get_active_sessions(
@@ -1479,14 +1486,17 @@ class Database:
     def _row_to_session(self, row: aiosqlite.Row) -> Session:
         """Convert a database row to a Session model."""
 
-        def parse_dt(value: Optional[str], fallback: Optional[datetime]) -> datetime:
-            if value:
-                return datetime.fromisoformat(value)
-            if fallback:
+        def parse_dt(
+            value: Optional[str], fallback: Optional[datetime] = None
+        ) -> Optional[datetime]:
+            if not value:
                 return fallback
-            return datetime.fromtimestamp(0)
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return fallback
 
-        started_at = parse_dt(row["started_at"], None)
+        started_at = parse_dt(row["started_at"]) or datetime.fromtimestamp(0)
         return Session(
             id=row["id"],
             session_id=row["session_id"],
@@ -1502,7 +1512,7 @@ class Database:
             season_number=row["season_number"],
             episode_number=row["episode_number"],
             started_at=started_at,
-            ended_at=(datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None),
+            ended_at=parse_dt(row["ended_at"]),
             play_duration_seconds=row["play_duration_seconds"] or 0,
             paused_duration_seconds=row["paused_duration_seconds"] or 0,
             is_active=bool(row["is_active"]),

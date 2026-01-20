@@ -74,7 +74,8 @@ class _DummyDB:
         self.created.append(session)
 
 
-def test_calculate_deltas_paused_then_playing():
+def test_calculate_deltas_was_paused():
+    """When previously paused, elapsed time counts as pause duration."""
     client = JellyfinWebSocketClient()
     last_update = datetime.now() - timedelta(seconds=10)
     existing = _build_session(last_update, last_position=50, last_paused=True)
@@ -84,11 +85,13 @@ def test_calculate_deltas_paused_then_playing():
         existing, position_seconds=70, is_paused=False, now=now
     )
 
+    # Was paused, so elapsed time goes to pause duration
     assert paused_add == 10
-    assert play_add == 20
+    assert play_add == 0
 
 
-def test_calculate_deltas_while_paused():
+def test_calculate_deltas_was_playing():
+    """When previously playing, elapsed time counts as play duration."""
     client = JellyfinWebSocketClient()
     last_update = datetime.now() - timedelta(seconds=10)
     existing = _build_session(last_update, last_position=50, last_paused=False)
@@ -98,8 +101,9 @@ def test_calculate_deltas_while_paused():
         existing, position_seconds=70, is_paused=True, now=now
     )
 
+    # Was playing, so elapsed time goes to play duration
     assert paused_add == 0
-    assert play_add == 0
+    assert play_add == 10
 
 
 @pytest.mark.asyncio

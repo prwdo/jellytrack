@@ -107,6 +107,155 @@ def _percent_delta(current: int, previous: int) -> float | None:
     return round(((current - previous) / previous) * 100, 1)
 
 
+def _prepare_heatmap_data(heatmap: list[dict]) -> tuple[list[dict], int]:
+    """Prepare heatmap data with Monday as first day."""
+    heatmap_points = []
+    heatmap_max = 0
+    heatmap_lookup = {(h["weekday"], h["hour"]): h["watch_seconds"] for h in heatmap}
+    for weekday in range(7):
+        for hour in range(24):
+            # Convert from Sunday=0 to Monday=0
+            db_weekday = (weekday + 1) % 7
+            count = heatmap_lookup.get((db_weekday, hour), 0)
+            heatmap_max = max(heatmap_max, count)
+            heatmap_points.append({"x": hour, "y": weekday, "v": count})
+    return heatmap_points, heatmap_max
+
+
+def _prepare_length_distribution(sessions_for_metrics: list[dict]) -> tuple[list[str], list[int]]:
+    """Calculate session length distribution."""
+    length_bins = [
+        ("<5m", 0, 5 * 60),
+        ("5-15m", 5 * 60, 15 * 60),
+        ("15-30m", 15 * 60, 30 * 60),
+        ("30-60m", 30 * 60, 60 * 60),
+        ("1-2h", 60 * 60, 120 * 60),
+        ("2h+", 120 * 60, None),
+    ]
+    length_labels = [label for label, _, _ in length_bins]
+    length_counts = [0 for _ in length_bins]
+    for session in sessions_for_metrics:
+        if session["is_active"]:
+            continue
+        total_seconds = session["play_seconds"] + session["paused_seconds"]
+        if total_seconds <= 0:
+            continue
+        for idx, (_, min_seconds, max_seconds) in enumerate(length_bins):
+            if max_seconds is None and total_seconds >= min_seconds:
+                length_counts[idx] += 1
+                break
+            if max_seconds is not None and min_seconds <= total_seconds < max_seconds:
+                length_counts[idx] += 1
+                break
+    return length_labels, length_counts
+
+
+def _prepare_concurrent_peaks(
+    sessions_for_metrics: list[dict], metrics_days: int
+) -> tuple[list[str], list[int]]:
+    """Calculate daily concurrent session peaks."""
+    concurrent_days = min(metrics_days, 90)
+    now = datetime.now()
+    since = now - timedelta(days=concurrent_days)
+    since_hour = since.replace(minute=0, second=0, microsecond=0)
+    total_hours = int((now - since_hour).total_seconds() // 3600) + 1
+    concurrent_hours = [0 for _ in range(total_hours)]
+
+    for session in sessions_for_metrics:
+        started_at = datetime.fromisoformat(session["started_at"])
+        if session["ended_at"]:
+            ended_at = datetime.fromisoformat(session["ended_at"])
+        elif session["last_progress_update"]:
+            ended_at = datetime.fromisoformat(session["last_progress_update"])
+        else:
+            ended_at = now
+        if session["is_active"]:
+            ended_at = now
+        if ended_at < since_hour or started_at > now:
+            continue
+        start = max(started_at, since_hour)
+        end = min(ended_at, now)
+        start_idx = int((start - since_hour).total_seconds() // 3600)
+        end_idx = min(int((end - since_hour).total_seconds() // 3600), total_hours - 1)
+        for idx in range(start_idx, end_idx + 1):
+            concurrent_hours[idx] += 1
+
+    concurrent_labels = []
+    concurrent_peaks = []
+    current_day = None
+    current_peak = 0
+    for idx, count in enumerate(concurrent_hours):
+        bucket_time = since_hour + timedelta(hours=idx)
+        day_label = bucket_time.date().isoformat()
+        if current_day is None:
+            current_day = day_label
+        if day_label != current_day:
+            concurrent_labels.append(current_day)
+            concurrent_peaks.append(current_peak)
+            current_day = day_label
+            current_peak = count
+        else:
+            current_peak = max(current_peak, count)
+    if current_day is not None:
+        concurrent_labels.append(current_day)
+        concurrent_peaks.append(current_peak)
+
+    return concurrent_labels, concurrent_peaks
+
+
+def _prepare_series_datasets(series_daily: list[dict], daily_labels: list[str]) -> list[dict]:
+    """Prepare series trend datasets for chart."""
+    series_totals: dict[str, int] = {}
+    for row in series_daily:
+        series_totals[row["series_name"]] = (
+            series_totals.get(row["series_name"], 0) + row["total_seconds"]
+        )
+    top_series = [
+        name for name, _ in sorted(series_totals.items(), key=lambda i: i[1], reverse=True)[:5]
+    ]
+
+    series_index = {label: idx for idx, label in enumerate(daily_labels)}
+    series_data_map = {name: [0 for _ in daily_labels] for name in top_series}
+    for row in series_daily:
+        name = row["series_name"]
+        if name not in series_data_map:
+            continue
+        idx = series_index.get(row["date"])
+        if idx is None:
+            continue
+        series_data_map[name][idx] = round(row["total_seconds"] / 3600, 2)
+
+    series_colors = [
+        "rgba(59, 130, 246, 0.35)",
+        "rgba(34, 197, 94, 0.35)",
+        "rgba(234, 179, 8, 0.35)",
+        "rgba(239, 68, 68, 0.35)",
+        "rgba(147, 51, 234, 0.35)",
+    ]
+    series_border_colors = [
+        "rgba(59, 130, 246, 0.9)",
+        "rgba(34, 197, 94, 0.9)",
+        "rgba(234, 179, 8, 0.9)",
+        "rgba(239, 68, 68, 0.9)",
+        "rgba(147, 51, 234, 0.9)",
+    ]
+
+    series_datasets = []
+    for idx, name in enumerate(top_series):
+        series_datasets.append(
+            {
+                "label": name,
+                "data": series_data_map[name],
+                "borderColor": series_border_colors[idx % len(series_border_colors)],
+                "backgroundColor": series_colors[idx % len(series_colors)],
+                "fill": True,
+                "tension": 0.3,
+                "pointRadius": 2,
+            }
+        )
+    return series_datasets
+
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, days: int = 30):
     """Main dashboard page."""
@@ -203,146 +352,21 @@ async def index(request: Request, days: int = 30):
     )
     filters = await db.get_filter_options(days=query_days)
 
-    # Prepare chart data as JSON
-    # Hourly chart data - ensure all 24 hours are represented
+    # Prepare chart data
     hourly_data = [0] * 24
     for h in hourly:
         hourly_data[h.hour] = h.session_count
 
-    # Daily chart data
     daily_labels = [d["date"] for d in daily]
     daily_sessions = [d["session_count"] for d in daily]
     daily_hours = [round(d["total_seconds"] / 3600, 1) for d in daily]
 
-    # Heatmap data (weekday x hour) - Monday as first day
-    heatmap_points = []
-    heatmap_max = 0
-    heatmap_lookup = {(h["weekday"], h["hour"]): h["watch_seconds"] for h in heatmap}
-    for weekday in range(7):
-        for hour in range(24):
-            # Convert from Sunday=0 to Monday=0: (weekday + 6) % 7
-            db_weekday = (weekday + 1) % 7
-            count = heatmap_lookup.get((db_weekday, hour), 0)
-            heatmap_max = max(heatmap_max, count)
-            heatmap_points.append({"x": hour, "y": weekday, "v": count})
-
-    # Session length distribution
-    length_bins = [
-        ("<5m", 0, 5 * 60),
-        ("5-15m", 5 * 60, 15 * 60),
-        ("15-30m", 15 * 60, 30 * 60),
-        ("30-60m", 30 * 60, 60 * 60),
-        ("1-2h", 60 * 60, 120 * 60),
-        ("2h+", 120 * 60, None),
-    ]
-    length_labels = [label for label, _, _ in length_bins]
-    length_counts = [0 for _ in length_bins]
-    for session in sessions_for_metrics:
-        if session["is_active"]:
-            continue
-        total_seconds = session["play_seconds"] + session["paused_seconds"]
-        if total_seconds <= 0:
-            continue
-        for idx, (_, min_seconds, max_seconds) in enumerate(length_bins):
-            if max_seconds is None and total_seconds >= min_seconds:
-                length_counts[idx] += 1
-                break
-            if max_seconds is not None and min_seconds <= total_seconds < max_seconds:
-                length_counts[idx] += 1
-                break
-
-    # Concurrent sessions (daily peak)
-    concurrent_days = min(metrics_days, 90)
-    now = datetime.now()
-    since = now - timedelta(days=concurrent_days)
-    since_hour = since.replace(minute=0, second=0, microsecond=0)
-    total_hours = int((now - since_hour).total_seconds() // 3600) + 1
-    concurrent_hours = [0 for _ in range(total_hours)]
-    for session in sessions_for_metrics:
-        started_at = datetime.fromisoformat(session["started_at"])
-        if session["ended_at"]:
-            ended_at = datetime.fromisoformat(session["ended_at"])
-        elif session["last_progress_update"]:
-            ended_at = datetime.fromisoformat(session["last_progress_update"])
-        else:
-            ended_at = now
-        if session["is_active"]:
-            ended_at = now
-        if ended_at < since_hour or started_at > now:
-            continue
-        start = max(started_at, since_hour)
-        end = min(ended_at, now)
-        start_idx = int((start - since_hour).total_seconds() // 3600)
-        end_idx = int((end - since_hour).total_seconds() // 3600)
-        for idx in range(start_idx, end_idx + 1):
-            concurrent_hours[idx] += 1
-    concurrent_labels = []
-    concurrent_peaks = []
-    current_day = None
-    current_peak = 0
-    for idx, count in enumerate(concurrent_hours):
-        bucket_time = since_hour + timedelta(hours=idx)
-        day_label = bucket_time.date().isoformat()
-        if current_day is None:
-            current_day = day_label
-        if day_label != current_day:
-            concurrent_labels.append(current_day)
-            concurrent_peaks.append(current_peak)
-            current_day = day_label
-            current_peak = count
-        else:
-            current_peak = max(current_peak, count)
-    if current_day is not None:
-        concurrent_labels.append(current_day)
-        concurrent_peaks.append(current_peak)
-
-    # Series trends (top 5 series)
-    series_totals: dict[str, int] = {}
-    for row in series_daily:
-        series_totals[row["series_name"]] = (
-            series_totals.get(row["series_name"], 0) + row["total_seconds"]
-        )
-    top_series = [
-        name for name, _ in sorted(series_totals.items(), key=lambda i: i[1], reverse=True)[:5]
-    ]
-    series_labels = daily_labels
-    series_index = {label: idx for idx, label in enumerate(series_labels)}
-    series_data_map = {name: [0 for _ in series_labels] for name in top_series}
-    for row in series_daily:
-        name = row["series_name"]
-        if name not in series_data_map:
-            continue
-        idx = series_index.get(row["date"])
-        if idx is None:
-            continue
-        series_data_map[name][idx] = round(row["total_seconds"] / 3600, 2)
-    series_colors = [
-        "rgba(59, 130, 246, 0.35)",
-        "rgba(34, 197, 94, 0.35)",
-        "rgba(234, 179, 8, 0.35)",
-        "rgba(239, 68, 68, 0.35)",
-        "rgba(147, 51, 234, 0.35)",
-    ]
-    series_border_colors = [
-        "rgba(59, 130, 246, 0.9)",
-        "rgba(34, 197, 94, 0.9)",
-        "rgba(234, 179, 8, 0.9)",
-        "rgba(239, 68, 68, 0.9)",
-        "rgba(147, 51, 234, 0.9)",
-    ]
-    series_datasets = []
-    for idx, name in enumerate(top_series):
-        series_datasets.append(
-            {
-                "label": name,
-                "data": series_data_map[name],
-                "borderColor": series_border_colors[idx % len(series_border_colors)],
-                "backgroundColor": series_colors[idx % len(series_colors)],
-                "fill": True,
-                "tension": 0.3,
-                "pointRadius": 2,
-            }
-        )
+    heatmap_points, heatmap_max = _prepare_heatmap_data(heatmap)
+    length_labels, length_counts = _prepare_length_distribution(sessions_for_metrics)
+    concurrent_labels, concurrent_peaks = _prepare_concurrent_peaks(
+        sessions_for_metrics, metrics_days
+    )
+    series_datasets = _prepare_series_datasets(series_daily, daily_labels)
 
     # Media types for pie chart
     media_type_labels = [mt["media_type"] for mt in media_types]
@@ -438,7 +462,7 @@ async def index(request: Request, days: int = 30):
             "length_counts_json": json.dumps(length_counts),
             "concurrent_labels_json": json.dumps(concurrent_labels),
             "concurrent_counts_json": json.dumps(concurrent_peaks),
-            "series_labels_json": json.dumps(series_labels),
+            "series_labels_json": json.dumps(daily_labels),
             "series_datasets_json": json.dumps(series_datasets),
         },
     )

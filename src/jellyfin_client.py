@@ -63,12 +63,12 @@ class JellyfinWebSocketClient:
             await ws.send(json.dumps({"MessageType": "SessionsStart", "Data": "0,2000"}))
             logger.info("Subscribed to session updates")
 
-            await self._refresh_sessions()
-
-            # Start timeout checker
+            # Start timeout checker before refresh to avoid race condition
             timeout_task = asyncio.create_task(self._check_timeouts())
 
             try:
+                await self._refresh_sessions()
+
                 async for message in ws:
                     await self._handle_message(message)
             finally:
@@ -260,12 +260,18 @@ class JellyfinWebSocketClient:
         is_paused: bool,
         now: datetime,
     ) -> tuple[int, int]:
+        """Calculate play and pause duration deltas.
+
+        Uses time-based calculation for both to ensure consistency.
+        Previous state determines whether elapsed time counts as play or pause.
+        """
         elapsed = max(0, int((now - existing.last_progress_update).total_seconds()))
-        paused_add = elapsed if existing.last_state_is_paused else 0
-        play_add = 0
-        if not is_paused:
-            play_add = max(0, position_seconds - existing.last_position_seconds)
-        return play_add, paused_add
+        # Cap elapsed time to avoid huge jumps from stale data
+        elapsed = min(elapsed, 300)  # Max 5 minutes per update
+        if existing.last_state_is_paused:
+            return 0, elapsed
+        else:
+            return elapsed, 0
 
     async def _finalize_session(
         self,

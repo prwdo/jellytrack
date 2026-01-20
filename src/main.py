@@ -32,7 +32,7 @@ class JellytrackServer:
         # Setup signal handlers
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.shutdown()))
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self.shutdown()))
 
         # Start WebSocket client and web server
         ws_task = asyncio.create_task(self._run_websocket_client())
