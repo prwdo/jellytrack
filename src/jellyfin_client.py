@@ -53,7 +53,8 @@ class JellyfinWebSocketClient:
         ws_url = settings.jellyfin_ws_url
         logger.info(f"Connecting to Jellyfin WebSocket: {ws_url.split('?')[0]}...")
 
-        async with websockets.connect(ws_url) as ws:
+        # Increase max_size to handle large session payloads from Jellyfin (default is 1MB)
+        async with websockets.connect(ws_url, max_size=16 * 1024 * 1024) as ws:
             self.ws = ws
             self._reconnect_delay = 1
             self._connected = True
