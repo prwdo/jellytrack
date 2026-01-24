@@ -85,25 +85,44 @@ def test_calculate_deltas_was_paused():
         existing, position_seconds=70, is_paused=False, now=now
     )
 
-    # Was paused, so elapsed time goes to pause duration
+    # Was paused, so elapsed time goes to pause duration, no play added
     assert paused_add == 10
     assert play_add == 0
 
 
 def test_calculate_deltas_was_playing():
-    """When previously playing, elapsed time counts as play duration."""
+    """When previously playing, position delta counts as play duration."""
     client = JellyfinWebSocketClient()
     last_update = datetime.now() - timedelta(seconds=10)
     existing = _build_session(last_update, last_position=50, last_paused=False)
     now = last_update + timedelta(seconds=10)
 
     play_add, paused_add = client._calculate_deltas(
-        existing, position_seconds=70, is_paused=True, now=now
+        existing, position_seconds=60, is_paused=False, now=now
     )
 
-    # Was playing, so elapsed time goes to play duration
+    # Was playing, so position delta (60-50=10) goes to play duration
     assert paused_add == 0
     assert play_add == 10
+
+
+def test_calculate_deltas_seeking_is_capped():
+    """Seeking forward should be capped to prevent inflated watch time."""
+    client = JellyfinWebSocketClient()
+    last_update = datetime.now() - timedelta(seconds=10)
+    existing = _build_session(last_update, last_position=50, last_paused=False)
+    now = last_update + timedelta(seconds=10)
+
+    play_add, paused_add = client._calculate_deltas(
+        existing,
+        position_seconds=500,
+        is_paused=False,
+        now=now,  # Big jump (seeking)
+    )
+
+    # Position jumped 450s but only 10s elapsed, so capped to elapsed + 10
+    assert play_add == 20  # 10s elapsed + 10s tolerance
+    assert paused_add == 0
 
 
 @pytest.mark.asyncio

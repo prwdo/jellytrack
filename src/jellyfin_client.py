@@ -263,16 +263,24 @@ class JellyfinWebSocketClient:
     ) -> tuple[int, int]:
         """Calculate play and pause duration deltas.
 
-        Uses time-based calculation for both to ensure consistency.
-        Previous state determines whether elapsed time counts as play or pause.
+        Uses position-based calculation for play time (more accurate for media consumption)
+        and time-based calculation for pause time.
         """
         elapsed = max(0, int((now - existing.last_progress_update).total_seconds()))
-        # Cap elapsed time to avoid huge jumps from stale data
-        elapsed = min(elapsed, 300)  # Max 5 minutes per update
-        if existing.last_state_is_paused:
-            return 0, elapsed
-        else:
-            return elapsed, 0
+        # Cap elapsed to avoid huge jumps from stale data
+        elapsed = min(elapsed, 300)
+
+        # Pause time: if was paused, add elapsed time
+        paused_add = elapsed if existing.last_state_is_paused else 0
+
+        # Play time: use position delta (more accurate than elapsed time)
+        play_add = 0
+        if not existing.last_state_is_paused:
+            play_add = max(0, position_seconds - existing.last_position_seconds)
+            # Cap play_add to avoid huge jumps from seeking
+            play_add = min(play_add, elapsed + 10)  # Allow small tolerance
+
+        return play_add, paused_add
 
     async def _finalize_session(
         self,
