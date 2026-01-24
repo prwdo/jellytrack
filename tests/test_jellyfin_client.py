@@ -11,6 +11,7 @@ from src.models import Session
 def _build_session(last_update: datetime, last_position: int, last_paused: bool) -> Session:
     return Session(
         session_id="session-1",
+        jellyfin_session_id="session-1",
         user_id="user-1",
         user_name="Test User",
         device_id="device-1",
@@ -39,6 +40,11 @@ class _DummyDB:
         self.updated = []
         self.ended = []
         self.created = []
+
+    async def get_active_session_by_jellyfin_id(self, session_id: str) -> Session | None:
+        if self.existing and self.existing.jellyfin_session_id == session_id:
+            return self.existing
+        return None
 
     async def get_active_session(self, session_id: str) -> Session | None:
         if self.existing and self.existing.session_id == session_id:

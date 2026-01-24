@@ -133,6 +133,7 @@ class PlaybackReportingImporter:
 
             session = Session(
                 session_id=session_id,
+                jellyfin_session_id=None,
                 user_id=user_id,
                 user_name=user_names.get(user_id, "Unknown"),
                 device_id=f"imported_{row_dict.get('DeviceName', 'unknown')}",

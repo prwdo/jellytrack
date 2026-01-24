@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
@@ -126,10 +127,10 @@ class JellyfinWebSocketClient:
             if not now_playing:
                 continue
 
-            session_id = session_data.get("Id", "")
-            if not session_id:
+            jellyfin_session_id = session_data.get("Id", "")
+            if not jellyfin_session_id:
                 continue
-            active_session_ids.add(session_id)
+            active_session_ids.add(jellyfin_session_id)
 
             play_state = session_data.get("PlayState", {})
             position_ticks = play_state.get("PositionTicks") or 0
@@ -138,23 +139,29 @@ class JellyfinWebSocketClient:
             # Calculate duration in seconds
             duration_seconds = position_ticks // 10_000_000
 
-            # Check if this is a new session
-            existing = await db.get_active_session(session_id)
+            # Check if this is a new session or item
+            existing = await db.get_active_session_by_jellyfin_id(jellyfin_session_id)
             if not existing:
-                event = self._extract_playback_event(session_data, now_playing)
+                existing = await db.get_active_session(jellyfin_session_id)
+            event = self._extract_playback_event(session_data, now_playing)
+            if existing and existing.media_id != event.item_id:
+                await self._finalize_session(existing, now)
+                await db.end_session(existing.session_id)
+                existing = None
+            if not existing:
                 await self._create_session(event, duration_seconds, is_paused)
             else:
                 play_add, paused_add = self._calculate_deltas(
                     existing, duration_seconds, is_paused, now
                 )
                 await db.update_session_state(
-                    session_id, duration_seconds, is_paused, play_add, paused_add, now
+                    existing.session_id, duration_seconds, is_paused, play_add, paused_add, now
                 )
 
         # Check for ended sessions (not in active list anymore)
         active_db_sessions = await db.get_active_sessions()
         for db_session in active_db_sessions:
-            if db_session.session_id not in active_session_ids:
+            if db_session.jellyfin_session_id not in active_session_ids:
                 await self._finalize_session(db_session, now)
                 await db.end_session(db_session.session_id)
                 logger.info(f"Session ended: {db_session.user_name} - {db_session.media_title}")
@@ -183,7 +190,13 @@ class JellyfinWebSocketClient:
         }
 
         event = self._extract_playback_event(session_data, now_playing)
-        existing = await db.get_active_session(session_id)
+        existing = await db.get_active_session_by_jellyfin_id(session_id)
+        if not existing:
+            existing = await db.get_active_session(session_id)
+        if existing and existing.media_id != event.item_id:
+            await self._finalize_session(existing, datetime.now())
+            await db.end_session(existing.session_id)
+            existing = None
         if not existing:
             await self._create_session(event, 0, False)
 
@@ -197,10 +210,12 @@ class JellyfinWebSocketClient:
         position_ticks = play_state.get("PositionTicks") or 0
         duration_seconds = position_ticks // 10_000_000
         is_paused = bool(play_state.get("IsPaused", False))
-        existing = await db.get_active_session(session_id)
+        existing = await db.get_active_session_by_jellyfin_id(session_id)
+        if not existing:
+            existing = await db.get_active_session(session_id)
         if existing:
             await self._finalize_session(existing, datetime.now(), duration_seconds, is_paused)
-        await db.end_session(session_id)
+            await db.end_session(existing.session_id)
 
         logger.info(f"Playback stopped for session {session_id}")
 
@@ -230,7 +245,8 @@ class JellyfinWebSocketClient:
         """Create a new session from a playback event."""
         now = datetime.now()
         session = Session(
-            session_id=event.session_id,
+            session_id=uuid.uuid4().hex,
+            jellyfin_session_id=event.session_id,
             user_id=event.user_id,
             user_name=event.user_name,
             device_id=event.device_id,

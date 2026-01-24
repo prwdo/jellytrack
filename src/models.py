@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class Session(BaseModel):
     id: Optional[int] = None
     session_id: str
+    jellyfin_session_id: Optional[str] = None
     user_id: str
     user_name: str
     device_id: str

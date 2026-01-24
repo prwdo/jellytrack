@@ -77,6 +77,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT UNIQUE,
+                jellyfin_session_id TEXT,
                 user_id TEXT,
                 user_name TEXT,
                 device_id TEXT,
@@ -105,6 +106,9 @@ class Database:
         await self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at)"
         )
+        await self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sessions_jellyfin ON sessions(jellyfin_session_id)"
+        )
         await self.conn.commit()
 
     async def _ensure_columns(self) -> None:
@@ -113,16 +117,26 @@ class Database:
         rows = await cursor.fetchall()
         existing = {row["name"] for row in rows}
         missing = {
+            "jellyfin_session_id": "TEXT",
             "paused_duration_seconds": "INTEGER DEFAULT 0",
             "last_position_seconds": "INTEGER DEFAULT 0",
             "last_state_is_paused": "BOOLEAN DEFAULT FALSE",
         }
         added = False
+        added_jellyfin = False
         for column, definition in missing.items():
             if column not in existing:
                 await self.conn.execute(f"ALTER TABLE sessions ADD COLUMN {column} {definition}")
                 added = True
+                if column == "jellyfin_session_id":
+                    added_jellyfin = True
         if added:
+            await self.conn.commit()
+        if added_jellyfin:
+            await self.conn.execute(
+                "UPDATE sessions SET jellyfin_session_id = session_id "
+                "WHERE jellyfin_session_id IS NULL"
+            )
             await self.conn.commit()
 
     async def _create_aggregate_tables(self) -> None:
@@ -163,13 +177,15 @@ class Database:
         """Create or update a playback session (UPSERT)."""
         cursor = await self.conn.execute(
             """
-            INSERT INTO sessions (session_id, user_id, user_name, device_id, device_name,
-                                  client_name, media_id, media_title, media_type, series_name,
+            INSERT INTO sessions (session_id, jellyfin_session_id, user_id, user_name, device_id,
+                                  device_name, client_name, media_id, media_title, media_type,
+                                  series_name,
                                   season_number, episode_number, started_at, ended_at,
                                   play_duration_seconds, paused_duration_seconds, is_active,
                                   last_position_seconds, last_state_is_paused, last_progress_update)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
+                jellyfin_session_id = excluded.jellyfin_session_id,
                 user_id = excluded.user_id,
                 user_name = excluded.user_name,
                 device_id = excluded.device_id,
@@ -192,6 +208,7 @@ class Database:
             """,
             (
                 session.session_id,
+                session.jellyfin_session_id,
                 session.user_id,
                 session.user_name,
                 session.device_id,
@@ -221,6 +238,19 @@ class Database:
         cursor = await self.conn.execute(
             "SELECT * FROM sessions WHERE session_id = ? AND is_active = TRUE",
             (session_id,),
+        )
+        row = await cursor.fetchone()
+        if row:
+            return self._row_to_session(row)
+        return None
+
+    async def get_active_session_by_jellyfin_id(
+        self, jellyfin_session_id: str
+    ) -> Optional[Session]:
+        """Get an active session by Jellyfin session ID."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM sessions WHERE jellyfin_session_id = ? AND is_active = TRUE",
+            (jellyfin_session_id,),
         )
         row = await cursor.fetchone()
         if row:
@@ -1500,6 +1530,7 @@ class Database:
         return Session(
             id=row["id"],
             session_id=row["session_id"],
+            jellyfin_session_id=row["jellyfin_session_id"],
             user_id=row["user_id"],
             user_name=row["user_name"],
             device_id=row["device_id"],

@@ -28,6 +28,7 @@ def _build_session(
 ):
     return Session(
         session_id=session_id,
+        jellyfin_session_id=session_id,
         user_id="user-1",
         user_name="Test User",
         device_id="device-1",
